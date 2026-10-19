@@ -1,0 +1,24 @@
+[package]
+name = "ma-engine"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "MessageArchiver's read-only engine: streams Messages data as NDJSON"
+publish = false
+
+# imessage-database is pinned exactly; chrono, rusqlite and plist are pinned to the versions it
+# pins, so there is one copy of each in the binary. crabapple (same author, GPL-3.0) decrypts
+# encrypted iOS backups; rusqlite's `serialize` opens the decrypted Messages database in memory.
+[dependencies]
+imessage-database = "=4.3.0"
+crabapple = "=0.4.7"
+chrono = "=0.4.45"
+rusqlite = { version = "=0.40.2", features = ["bundled", "serialize"] }
+plist = "=1.10.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

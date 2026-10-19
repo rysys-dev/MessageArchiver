@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+build/
+engine/target/
+*.xcuserstate
+.DS_Store
+.vscode/
+dist/

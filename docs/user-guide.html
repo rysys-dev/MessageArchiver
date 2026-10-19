@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MessageArchiver User Guide</title>
+<meta name="description" content="How to use RYSYS MessageArchiver for macOS: install it, export your Messages conversations with their attachments, update, verify and search an archive, and read iPhone backups.">
+<style>
+/* A reference manual: one reading column, a contents list at the top; the app's green. */
+:root {
+  --bg: #f5f8f6; --surface: #ffffff; --fg: #17241c; --muted: #56675c; --line: #d6e2da;
+  --accent: #1f8a4c; --accent-soft: #e3f4ea; --code-bg: #edf3ef; --code-fg: #17603a;
+  --note-bg: #fff7e6; --note-edge: #e0b252;
+  --font-body: -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111814; --surface: #17211b; --fg: #e2ebe5; --muted: #98aa9e; --line: #2a3a30;
+    --accent: #5fd08e; --accent-soft: #173323; --code-bg: #1c2a21; --code-fg: #8fe0b0;
+    --note-bg: #2a2416; --note-edge: #9c7a2c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111814; --surface: #17211b; --fg: #e2ebe5; --muted: #98aa9e; --line: #2a3a30;
+  --accent: #5fd08e; --accent-soft: #173323; --code-bg: #1c2a21; --code-fg: #8fe0b0;
+  --note-bg: #2a2416; --note-edge: #9c7a2c; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); line-height: 1.6;
+       margin: 0; padding: 0 16px 64px; }
+main { max-width: 760px; margin: 0 auto; }
+header { padding: 48px 0 24px; border-bottom: 1px solid var(--line); }
+h1 { font-size: 2.2rem; margin: 0 0 4px; line-height: 1.15; }
+header p { color: var(--muted); margin: 0; }
+h2 { font-size: 1.5rem; margin: 48px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.15rem; margin: 28px 0 6px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, kbd { font-family: var(--font-mono); font-size: 0.9em; background: var(--code-bg); color: var(--code-fg);
+            padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.menu { font-weight: 600; }
+nav { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 20px; margin: 24px 0; }
+nav ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+@media (max-width: 560px) { nav ol { columns: 1; } }
+.note { background: var(--note-bg); border-left: 4px solid var(--note-edge); padding: 10px 14px; border-radius: 6px; margin: 16px 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>MessageArchiver</h1>
+  <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
+</header>
+
+<nav aria-label="Contents">
+  <ol>
+    <li><a href="#install">Install</a></li>
+    <li><a href="#first-launch">First launch</a></li>
+    <li><a href="#choose">Choose what to export</a></li>
+    <li><a href="#people">People and names</a></li>
+    <li><a href="#export">Export</a></li>
+    <li><a href="#archive">What's in an archive</a></li>
+    <li><a href="#update">Update an archive</a></li>
+    <li><a href="#verify">Verify an archive</a></li>
+    <li><a href="#search">Search an archive</a></li>
+    <li><a href="#iphone">iPhone backups</a></li>
+    <li><a href="#settings">Settings</a></li>
+    <li><a href="#privacy">Privacy and safety</a></li>
+    <li><a href="#questions">Questions</a></li>
+  </ol>
+</nav>
+
+<h2 id="install">Install</h2>
+<p>You need a Mac with Apple silicon (M1 or later) running macOS 27 or later.</p>
+<ol>
+  <li>Download the zip and double-click it. You get <code>MessageArchiver.app</code>.</li>
+  <li>Drag it to your <strong>Applications</strong> folder.</li>
+  <li>Double-click it. macOS says it can't check the app for malicious software, because it isn't from the App Store or a registered Apple developer. Click <strong>Done</strong>.</li>
+  <li>Open <span class="menu">System Settings › Privacy &amp; Security</span>, scroll down to the message about MessageArchiver, and click <strong>Open Anyway</strong>. Enter your Mac's password.</li>
+  <li>Open MessageArchiver again and click <strong>Open Anyway</strong>. You only do this once.</li>
+</ol>
+<p>To install a newer version, quit MessageArchiver, replace the app in Applications, and open it. Your settings and permissions stay.</p>
+
+<h2 id="first-launch">First launch</h2>
+<h3>Full Disk Access</h3>
+<p>macOS keeps your Messages history private, so MessageArchiver asks for <strong>Full Disk Access</strong> before it can read it. The first screen has a button that opens the right place in System Settings: turn on MessageArchiver there. When macOS offers <strong>Quit &amp; Reopen</strong>, click it.</p>
+<h3>Contacts (optional)</h3>
+<p>With Contacts allowed, conversations show people's names instead of phone numbers and email addresses. You can skip this and turn it on later in Settings.</p>
+<h3>The start screen</h3>
+<p>The start screen shows what's in Messages: how many messages and conversations, the dates they span, and the attachments. Click <strong>Choose What to Export</strong>.</p>
+
+<h2 id="choose">Choose what to export</h2>
+<p>The dashboard lists every conversation, newest first. Everything is ticked to begin with.</p>
+<ul>
+  <li><strong>Dates:</strong> All, Last 12 Months, or Custom (from and to, both days included).</li>
+  <li><strong>Conversations or People:</strong> tick conversations one by one, or tick a person to take all their conversations.</li>
+  <li><strong>Everyone, In Contacts, Not in Contacts:</strong> narrows the list, and what's exported, to people in your Contacts or not.</li>
+  <li><strong>Leave out group chats</strong> (in People): only one-to-one conversations.</li>
+  <li><strong>Search:</strong> in Conversations, finds names, phone numbers, emails <em>and words said in the messages</em>; each row says how many messages mention it. In People, it finds names and numbers. <strong>Select All</strong> and <strong>Select None</strong> act on the rows you see.</li>
+</ul>
+<p>The right side shows the totals, a chart of activity by month, the people with the most messages, and <strong>This export</strong>: how many conversations, messages and attachments you've chosen, and roughly how much space the archive needs. <strong>Save to</strong> shows where it goes and the free space there.</p>
+<div class="note">The first time, MessageArchiver reads every message once so the search can find words said (a line under the search box shows its progress). After that it only reads what's new.</div>
+
+<h2 id="people">People and names</h2>
+<p>A person is all their phone numbers and email addresses together. MessageArchiver groups them from your Contacts and from Messages itself. In <strong>People</strong> you can fix what it got wrong:</p>
+<ul>
+  <li><strong>Merge…</strong> two or more people who are really one, under one name.</li>
+  <li><strong>Split</strong> a person back into one row per number or email.</li>
+  <li><strong>Rename…</strong> a person, for example someone not in your Contacts.</li>
+</ul>
+<p>These are kept for every export and only change the archive, never Messages or Contacts.</p>
+
+<h2 id="export">Export</h2>
+<p>Click <strong>Export…</strong>. Name the archive (the suggestion says what's in it) and choose:</p>
+<div class="table-wrap"><table>
+  <tr><th>Format</th><th>What it is</th></tr>
+  <tr><td>Conversation pages (HTML)</td><td>Looks like Messages, with photos and videos in place. Opens in any browser.</td></tr>
+  <tr><td>Markdown</td><td>Plain text, one file per conversation: for reading, or to give an AI assistant.</td></tr>
+  <tr><td>JSON</td><td>Structured data for research and other software.</td></tr>
+  <tr><td>Legal transcript (PDF and HTML)</td><td>Numbered entries, attachments listed as exhibits with their SHA-256, Bates numbers and Page X of Y. Add the matter, who prepared it and for whom; they go on the cover page.</td></tr>
+</table></div>
+<ul>
+  <li><strong>Attachments:</strong> a folder for each person or group, or all in one folder.</li>
+  <li><strong>Convert photos, audio and video so any browser plays them:</strong> HEIC photos become JPEG, voice notes M4A, and MOV videos MP4. Videos need the free <code>ffmpeg</code> tool; without it they're copied as they are (Safari still plays them).</li>
+  <li><strong>Keep the originals beside converted copies:</strong> recommended for a legal record.</li>
+</ul>
+<p>The export runs with a progress bar; you can keep using your Mac. <strong>Stop</strong> leaves complete pages for what was done. When it finishes, open the archive, show it in Finder, verify it or search it.</p>
+
+<h2 id="archive">What's in an archive</h2>
+<p>Each export is a new folder; nothing already on the disk is replaced.</p>
+<div class="table-wrap"><table>
+  <tr><th>Item</th><th>What it holds</th></tr>
+  <tr><td><code>index.html</code></td><td>Start here: every conversation with its dates and counts, and links to each format. It also lists anything that couldn't be copied.</td></tr>
+  <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
+  <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
+  <tr><td><code>Markdown/</code>, <code>JSON/</code></td><td>One file per conversation; <code>JSON/</code> also has <code>people.json</code> and <code>archive.json</code>.</td></tr>
+  <tr><td><code>Attachments/</code></td><td>Photos, videos, voice notes and files, named by date, each dated as it was sent.</td></tr>
+  <tr><td><code>manifest.json</code>, <code>SHA256SUMS.txt</code></td><td>The size and SHA-256 of every file, to prove nothing changed.</td></tr>
+</table></div>
+<p><strong>Missing attachments</strong> are ones Messages lists but whose file isn't on the Mac. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
+
+<h2 id="update">Update an archive</h2>
+<p><span class="menu">File › Update Archive…</span> (<kbd>⇧⌘U</kbd>), or <strong>Update an existing archive…</strong> on the dashboard, adds what's new since the archive was made, with the same choices. Only conversations with new or edited messages are rebuilt. The files it replaces go to the Trash (or, on a drive without one, to a <code>RYSYS Trash</code> folder on that drive).</p>
+
+<h2 id="verify">Verify an archive</h2>
+<p><span class="menu">File › Verify Archive…</span> checks every file against the manifest and lists any that changed, went missing or were added. Anyone can check it without MessageArchiver too: in Terminal, in the archive folder, run <code>shasum -a 256 -c SHA256SUMS.txt</code>.</p>
+
+<h2 id="search">Search an archive</h2>
+<p><span class="menu">File › Search an Archive…</span> (<kbd>⇧⌘F</kbd>) finds any message in an archive. Type words in any order (accents and case don't matter; put a phrase in quotes), and narrow by person, conversation, dates or attachments. Click a result to see it in its conversation, outlined.</p>
+
+<h2 id="iphone">iPhone backups</h2>
+<p>MessageArchiver can read a backup of an iPhone made with Finder instead of this Mac's Messages, which helps when the iPhone has older messages than the Mac.</p>
+<ol>
+  <li>Connect the iPhone, select it in Finder's sidebar, and click <strong>Back Up Now</strong> with "Back up all of the data on your iPhone to this Mac" chosen.</li>
+  <li>In MessageArchiver, open the menu under the heading on the start screen (or in the dashboard's toolbar) and choose the backup.</li>
+  <li>If the backup is encrypted, enter its password. It's used only to read the backup and is never saved; you enter it again next time.</li>
+</ol>
+<p>The backup is only read. With a backup, the dashboard's search covers names and numbers only, since a backup's messages aren't copied anywhere.</p>
+
+<h2 id="settings">Settings</h2>
+<p><span class="menu">MessageArchiver › Settings…</span> (<kbd>⌘,</kbd>):</p>
+<ul>
+  <li><strong>Permissions:</strong> Full Disk Access and Contacts, with Check Again.</li>
+  <li><strong>Search index:</strong> its size and when it was updated; <strong>Update Now</strong>, or <strong>Delete…</strong> to move it to the Trash (it's made again when needed).</li>
+  <li><strong>Converters:</strong> what converts photos, audio and video. <code>sips</code> and <code>afconvert</code> come with macOS; <code>ffmpeg</code> is optional.</li>
+  <li><strong>Appearance and skin:</strong> light, dark or automatic, and the app's colours. Skins are small JSON files you can export, edit and import.</li>
+</ul>
+
+<h2 id="privacy">Privacy and safety</h2>
+<ul>
+  <li><strong>Read only.</strong> MessageArchiver never changes Messages, its attachments, Contacts or an iPhone backup.</li>
+  <li><strong>Offline.</strong> It makes no network connections. Nothing leaves your Mac; the link at the bottom only opens this page.</li>
+  <li><strong>Never overwrites.</strong> A new export is a new folder. An update sends what it replaces to the Trash.</li>
+  <li><strong>Its own files</strong> are in <code>~/Library/Application Support/RYSYS4MAC/MessageArchiver/</code>: settings, your merges and names, and the search index (a copy of your messages' text, readable only by you). Delete that folder, and the app, to remove MessageArchiver completely.</li>
+</ul>
+
+<h2 id="questions">Questions</h2>
+<h3>Why does the count of messages differ from Messages?</h3>
+<p>Tapbacks (hearts, thumbs up and the like) are shown on the message they react to rather than as messages of their own, and messages in more than one conversation are counted once.</p>
+<h3>Can I export just one conversation?</h3>
+<p>Yes: Select None, tick that conversation, and click Export…</p>
+<h3>Is it free?</h3>
+<p>Yes. MessageArchiver is free software under the GNU GPL v3. It's built on <a href="https://github.com/ReagentX/imessage-exporter">imessage-exporter</a>'s library by ReagentX. The source link and third-party notices are in <span class="menu">MessageArchiver › About MessageArchiver</span>.</p>
+</main>
+</body>
+</html>
