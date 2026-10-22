@@ -1,0 +1,9 @@
+{
+  "id": "signal",
+  "name": "Signal",
+  "version": "1.0.0",
+  "protocol": 2,
+  "minimum_app": "1.1.0",
+  "executable": "ma-signal",
+  "cargo_package": "ma-signal"
+}

@@ -14,7 +14,7 @@ public enum SearchIndex {
         CREATE TABLE IF NOT EXISTS messages(
             id INTEGER PRIMARY KEY, msg_rowid INTEGER, guid TEXT, thread_id INTEGER, thread_title TEXT,
             sender TEXT, handle TEXT, person_id TEXT, from_me INTEGER, date TEXT, day TEXT,
-            has_attachment INTEGER, page TEXT, anchor TEXT, body TEXT);
+            has_attachment INTEGER, page TEXT, anchor TEXT, body TEXT, source TEXT NOT NULL DEFAULT 'messages', service TEXT);
         CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, date);
         CREATE INDEX IF NOT EXISTS messages_day ON messages(day);
         CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(body, content='messages', content_rowid='id',
@@ -25,6 +25,29 @@ public enum SearchIndex {
             INSERT INTO fts(fts, rowid, body) VALUES ('delete', old.id, old.body); END;
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
         """
+
+    /// An index made before Milestone 13 has no `source` column: every row in it is Messages'.
+    /// The writer adds the column (1.0 still writes to it, and gets the default); the reader,
+    /// which only reads, uses `'messages'` in its place. Before Milestone 14 there was no
+    /// `service` either: rows written then have none, and only show with every platform ticked.
+    static func hasColumn(_ db: OpaquePointer?, _ name: String) -> Bool {
+        var s: OpaquePointer?
+        defer { sqlite3_finalize(s) }
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('messages') WHERE name = '\(name)'", -1, &s, nil) == SQLITE_OK else { return false }
+        return sqlite3_step(s) == SQLITE_ROW
+    }
+
+    /// SQL for "not one of these services", quoted; the names come from the engine.
+    static func notIn(_ services: Set<String>, column: String) -> String {
+        "\(column) NOT IN (\(services.sorted().map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ",")))"
+    }
+
+    /// `WHERE` for these conversations, by source; the numbers come from the app, never the user.
+    static func threadsClause(_ threads: [ThreadRef], source: String = "source") -> String {
+        Dictionary(grouping: threads, by: \.source).sorted { $0.key < $1.key }.map { src, refs in
+            "(\(source) = '\(src.rawValue.replacingOccurrences(of: "'", with: "''"))' AND thread_id IN (\(refs.map { String($0.id) }.joined(separator: ","))))"
+        }.joined(separator: " OR ")
+    }
 
     /// What the user typed, as an FTS5 query: every word must appear; the last may be the start
     /// of a word (it's matched as you type); "quoted words" stay a phrase. Nothing the user types
@@ -59,8 +82,9 @@ final class SearchIndexWriter {
     struct Row {
         var rowid: Int
         var guid: String
-        var threadId: Int
+        var threadId: ThreadRef
         var threadTitle: String
+        var service: String?
         var sender: String
         var handle: String?
         var personId: String?
@@ -73,25 +97,34 @@ final class SearchIndexWriter {
     }
 
     /// Opens (or makes) the archive's index; `replacing` conversations lose their old entries.
-    convenience init(root: URL, replacing threads: [Int]) throws {
+    convenience init(root: URL, replacing threads: [ThreadRef]) throws {
         try self.init(url: SearchIndex.url(root), replacing: threads)
     }
 
     /// Opens (or makes) an index file; `replacing` conversations lose their old entries
-    /// (`-1` for the messages in no conversation).
-    init(url: URL, replacing threads: [Int]) throws {
+    /// (`ThreadRef.noConversation` for the messages in none); `replacingAll`, every entry.
+    init(url: URL, replacing threads: [ThreadRef], replacingAll: Bool = false) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             throw SearchError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
         try exec(SearchIndex.schema)
+        if !SearchIndex.hasColumn(db, "source") {
+            try exec("ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT 'messages'")
+        }
+        if !SearchIndex.hasColumn(db, "service") {
+            try exec("ALTER TABLE messages ADD COLUMN service TEXT")
+        }
+        try exec("CREATE INDEX IF NOT EXISTS messages_source_thread ON messages(source, thread_id, date)")
         try exec("BEGIN")
-        if !threads.isEmpty {
-            try exec("DELETE FROM messages WHERE thread_id IN (\(threads.map(String.init).joined(separator: ",")))")
+        if replacingAll {
+            try exec("DELETE FROM messages")
+        } else if !threads.isEmpty {
+            try exec("DELETE FROM messages WHERE \(SearchIndex.threadsClause(threads))")
         }
         let sql = """
             INSERT INTO messages(msg_rowid, guid, thread_id, thread_title, sender, handle, person_id, from_me, date, day,
-                                 has_attachment, page, anchor, body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                 has_attachment, page, anchor, body, source, service) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """
         guard sqlite3_prepare_v2(db, sql, -1, &insert, nil) == SQLITE_OK else { throw SearchError.sqlite(String(cString: sqlite3_errmsg(db))) }
     }
@@ -106,7 +139,7 @@ final class SearchIndexWriter {
         sqlite3_reset(s)
         sqlite3_bind_int64(s, 1, Int64(r.rowid))
         bind(s, 2, r.guid)
-        sqlite3_bind_int64(s, 3, Int64(r.threadId))
+        sqlite3_bind_int64(s, 3, Int64(r.threadId.id))
         bind(s, 4, r.threadTitle)
         bind(s, 5, r.sender)
         bind(s, 6, r.handle)
@@ -118,6 +151,8 @@ final class SearchIndexWriter {
         bind(s, 12, r.page)
         bind(s, 13, r.anchor)
         bind(s, 14, r.body)
+        bind(s, 15, r.threadId.source.rawValue)
+        bind(s, 16, r.service)
         sqlite3_step(s)
     }
 
@@ -165,7 +200,7 @@ public enum SearchError: Error, Equatable, LocalizedError {
 /// One message found.
 public struct SearchHit: Sendable, Identifiable, Equatable {
     public var id: Int
-    public var threadId: Int
+    public var threadId: ThreadRef
     public var threadTitle: String
     public var sender: String
     public var handle: String?
@@ -181,12 +216,16 @@ public struct SearchHit: Sendable, Identifiable, Equatable {
 
 public struct SearchFilters: Sendable, Equatable {
     public var personId: String?
-    public var threadId: Int?
+    public var threadId: ThreadRef?
     public var from: String?
     public var to: String?
     public var hasAttachment = false
+    /// The Platform filter: services left out.
+    public var platforms = PlatformFilter()
 
-    public init(personId: String? = nil, threadId: Int? = nil, from: String? = nil, to: String? = nil, hasAttachment: Bool = false) {
+    public init(personId: String? = nil, threadId: ThreadRef? = nil, from: String? = nil, to: String? = nil, hasAttachment: Bool = false,
+                platforms: PlatformFilter = .init()) {
+        self.platforms = platforms
         self.personId = personId
         self.threadId = threadId
         self.from = from
@@ -194,7 +233,7 @@ public struct SearchFilters: Sendable, Equatable {
         self.hasAttachment = hasAttachment
     }
 
-    public var isEmpty: Bool { personId == nil && threadId == nil && from == nil && to == nil && !hasAttachment }
+    public var isEmpty: Bool { personId == nil && threadId == nil && from == nil && to == nil && !hasAttachment && platforms.isAll }
 }
 
 /// Searches an archive's index (spec §12). Reads only.
@@ -202,6 +241,10 @@ public final class ArchiveSearch: @unchecked Sendable {
     public let root: URL
     private var db: OpaquePointer?
     private let lock = NSLock()
+    /// The `source` column, or Messages for an index made before there was one.
+    private var source = "m.source"
+    /// The `service` column, or none for an index made before Milestone 14.
+    private var service = "m.service"
 
     public convenience init(root: URL) throws {
         try self.init(url: SearchIndex.url(root), root: root)
@@ -214,9 +257,17 @@ public final class ArchiveSearch: @unchecked Sendable {
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             throw SearchError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
+        if !SearchIndex.hasColumn(db, "source") { source = "'messages'" }
+        if !SearchIndex.hasColumn(db, "service") { service = "NULL" }
     }
 
     deinit { sqlite3_close(db) }
+
+    /// Made since Milestone 14: every row names its service.
+    public var hasServices: Bool { service != "NULL" }
+
+    /// The thread's id as `ThreadRef.description` gives it: `10`, or `whatsapp:10`.
+    private var threadKey: String { "(CASE \(source) WHEN 'messages' THEN CAST(m.thread_id AS TEXT) ELSE \(source) || ':' || m.thread_id END)" }
 
     public static let hitStart: Character = "\u{2}"
     public static let hitEnd: Character = "\u{3}"
@@ -232,14 +283,15 @@ public final class ArchiveSearch: @unchecked Sendable {
             binds.append(match)
         }
         if let p = filters.personId { whereParts.append("m.person_id = ?"); binds.append(p) }
-        if let t = filters.threadId { whereParts.append("m.thread_id = ?"); binds.append(t) }
+        if let t = filters.threadId { whereParts.append("\(source) = ? AND m.thread_id = ?"); binds += [t.source.rawValue, t.id] }
         if let f = filters.from { whereParts.append("m.day >= ?"); binds.append(f) }
         if let t = filters.to { whereParts.append("m.day <= ?"); binds.append(t) }
         if filters.hasAttachment { whereParts.append("m.has_attachment = 1") }
+        if let clause = platformClause(filters.platforms) { whereParts.append(clause) }
         let snippet = match == nil ? "substr(m.body, 1, 160)" : "snippet(fts, 0, char(2), char(3), '…', 14)"
         let from = match == nil ? "messages m" : "fts JOIN messages m ON m.id = fts.rowid"
         let sql = """
-            SELECT m.id, m.thread_id, m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, \(snippet)
+            SELECT m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, \(snippet)
             FROM \(from) WHERE \(whereParts.joined(separator: " AND ")) ORDER BY m.date DESC, m.id DESC LIMIT \(limit)
             """
         return rows(sql, binds)
@@ -247,26 +299,48 @@ public final class ArchiveSearch: @unchecked Sendable {
 
     /// The messages around one, in its conversation, oldest first: what a hit looks like in place.
     public func context(of id: Int, around n: Int = 12) -> [SearchHit] {
-        guard let hit = rows("SELECT id, thread_id, thread_title, sender, handle, from_me, date, has_attachment, page, anchor, body FROM messages WHERE id = ?", [id]).first else { return [] }
-        let cols = "id, thread_id, thread_title, sender, handle, from_me, date, has_attachment, page, anchor, body"
-        let before = rows("SELECT \(cols) FROM messages WHERE thread_id = ? AND (date < ? OR (date = ? AND id < ?)) ORDER BY date DESC, id DESC LIMIT \(n)",
-                          [hit.threadId, hit.date ?? "", hit.date ?? "", id])
-        let after = rows("SELECT \(cols) FROM messages WHERE thread_id = ? AND (date > ? OR (date = ? AND id > ?)) ORDER BY date, id LIMIT \(n)",
-                         [hit.threadId, hit.date ?? "", hit.date ?? "", id])
+        let cols = "m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, m.body"
+        guard let hit = rows("SELECT \(cols) FROM messages m WHERE m.id = ?", [id]).first else { return [] }
+        let same = "\(source) = ? AND m.thread_id = ?"
+        let t: [Any] = [hit.threadId.source.rawValue, hit.threadId.id]
+        let before = rows("SELECT \(cols) FROM messages m WHERE \(same) AND (m.date < ? OR (m.date = ? AND m.id < ?)) ORDER BY m.date DESC, m.id DESC LIMIT \(n)",
+                          t + [hit.date ?? "", hit.date ?? "", id])
+        let after = rows("SELECT \(cols) FROM messages m WHERE \(same) AND (m.date > ? OR (m.date = ? AND m.id > ?)) ORDER BY m.date, m.id LIMIT \(n)",
+                         t + [hit.date ?? "", hit.date ?? "", id])
         return before.reversed() + [hit] + after
     }
 
     /// How many messages match in each conversation (R2: the dashboard's search).
-    public func threadMatches(_ text: String) -> [Int: Int] {
+    /// A row with no service (written before Milestone 14) passes only when nothing is left out.
+    private func platformClause(_ p: PlatformFilter) -> String? {
+        p.isAll ? nil : "\(service) IS NOT NULL AND " + SearchIndex.notIn(p.hidden, column: service)
+    }
+
+    /// The services the index names, for the Platform filter; none in an index from before it.
+    public func services() -> [String] {
+        lock.withLock {
+            var s: OpaquePointer?
+            defer { sqlite3_finalize(s) }
+            guard sqlite3_prepare_v2(db, "SELECT DISTINCT \(service) FROM messages m WHERE \(service) IS NOT NULL", -1, &s, nil) == SQLITE_OK else { return [] }
+            var out: [String] = []
+            while sqlite3_step(s) == SQLITE_ROW { if let t = text(s, 0) { out.append(t) } }
+            return PlatformFilter.ordered(out)
+        }
+    }
+
+    public func threadMatches(_ text: String, platforms: PlatformFilter = .init()) -> [ThreadRef: Int] {
         guard let match = SearchIndex.query(text) else { return [:] }
+        let only = platformClause(platforms).map { " AND " + $0 } ?? ""
         return lock.withLock {
             var s: OpaquePointer?
             defer { sqlite3_finalize(s) }
-            let sql = "SELECT m.thread_id, COUNT(*) FROM fts JOIN messages m ON m.id = fts.rowid WHERE fts MATCH ? GROUP BY m.thread_id"
+            let sql = "SELECT \(threadKey), COUNT(*) FROM fts JOIN messages m ON m.id = fts.rowid WHERE fts MATCH ?\(only) GROUP BY 1"
             guard sqlite3_prepare_v2(db, sql, -1, &s, nil) == SQLITE_OK else { return [:] }
             bind(s, 1, match)
-            var out: [Int: Int] = [:]
-            while sqlite3_step(s) == SQLITE_ROW { out[Int(sqlite3_column_int64(s, 0))] = Int(sqlite3_column_int64(s, 1)) }
+            var out: [ThreadRef: Int] = [:]
+            while sqlite3_step(s) == SQLITE_ROW {
+                if let t = self.text(s, 0).flatMap(ThreadRef.init) { out[t] = Int(sqlite3_column_int64(s, 1)) }
+            }
             return out
         }
     }
@@ -282,6 +356,7 @@ public final class ArchiveSearch: @unchecked Sendable {
     }
 
     public struct Choice: Sendable, Identifiable, Hashable {
+        /// A person id; for a conversation, `ThreadRef.description`.
         public var id: String
         public var name: String
         public var count: Int
@@ -293,7 +368,7 @@ public final class ArchiveSearch: @unchecked Sendable {
     }
 
     public func conversations() -> [Choice] {
-        choices("SELECT thread_id, MAX(thread_title), COUNT(*) FROM messages GROUP BY thread_id")
+        choices("SELECT \(threadKey), MAX(m.thread_title), COUNT(*) FROM messages m GROUP BY 1")
     }
 
     public var messageCount: Int {
@@ -329,7 +404,7 @@ public final class ArchiveSearch: @unchecked Sendable {
             }
             var out: [SearchHit] = []
             while sqlite3_step(s) == SQLITE_ROW {
-                out.append(SearchHit(id: Int(sqlite3_column_int64(s, 0)), threadId: Int(sqlite3_column_int64(s, 1)),
+                out.append(SearchHit(id: Int(sqlite3_column_int64(s, 0)), threadId: text(s, 1).flatMap(ThreadRef.init) ?? .noConversation(),
                                      threadTitle: text(s, 2) ?? "", sender: text(s, 3) ?? "", handle: text(s, 4),
                                      fromMe: sqlite3_column_int(s, 5) != 0, date: text(s, 6), hasAttachment: sqlite3_column_int(s, 7) != 0,
                                      page: text(s, 8), anchor: text(s, 9) ?? "", snippet: text(s, 10) ?? ""))

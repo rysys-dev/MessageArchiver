@@ -56,6 +56,8 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.0.0-manual.pdf">full manual (PDF, 39 pages, 6.4 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
+
 <nav aria-label="Contents">
   <ol>
     <li><a href="#install">Install</a></li>
@@ -68,6 +70,7 @@ th { color: var(--muted); font-weight: 600; }
     <li><a href="#verify">Verify an archive</a></li>
     <li><a href="#search">Search an archive</a></li>
     <li><a href="#iphone">iPhone backups</a></li>
+    <li><a href="#plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</a></li>
     <li><a href="#settings">Settings</a></li>
     <li><a href="#privacy">Privacy and safety</a></li>
     <li><a href="#questions">Questions</a></li>
@@ -99,10 +102,11 @@ th { color: var(--muted); font-weight: 600; }
   <li><strong>Dates:</strong> All, Last 12 Months, or Custom (from and to, both days included).</li>
   <li><strong>Conversations or People:</strong> tick conversations one by one, or tick a person to take all their conversations.</li>
   <li><strong>Everyone, In Contacts, Not in Contacts:</strong> narrows the list, and what's exported, to people in your Contacts or not.</li>
+  <li><strong>All platforms</strong> (at the right of the dates): a tick for each way messages were sent, such as iMessage, SMS, RCS or WhatsApp. Untick one to leave its messages out of the lists, the counts and the export, even inside a conversation that mixes them; the menu then says how many are ticked, for example "3 of 4 platforms". The archive says which platforms it holds.</li>
   <li><strong>Leave out group chats</strong> (in People): only one-to-one conversations.</li>
-  <li><strong>Search:</strong> in Conversations, finds names, phone numbers, emails <em>and words said in the messages</em>; each row says how many messages mention it. In People, it finds names and numbers. <strong>Select All</strong> and <strong>Select None</strong> act on the rows you see.</li>
+  <li><strong>Search:</strong> in Conversations, finds names, phone numbers, emails <em>and words said in the messages</em>; each row says how many messages mention it. In People, it finds names and numbers. The checkbox at the top of the list ticks every row you see, or unticks them all when they all are; it shows a dash when only some are ticked.</li>
 </ul>
-<p>The right side shows the totals, a chart of activity by month, the people with the most messages, and <strong>This export</strong>: how many conversations, messages and attachments you've chosen, and roughly how much space the archive needs. <strong>Save to</strong> shows where it goes and the free space there.</p>
+<p>The right side shows, first, what doesn't change as you choose: <strong>All sources</strong>, each source's totals, and the people with the most messages (click a name to see that person in People). Then what you've chosen: a chart of its activity by month, and <strong>This export</strong>: how many conversations, messages and attachments you've chosen, and roughly how much space the archive needs. <strong>Save to</strong> shows where it goes and the free space there.</p>
 <div class="note">The first time, MessageArchiver reads every message once so the search can find words said (a line under the search box shows its progress). After that it only reads what's new.</div>
 
 <h2 id="people">People and names</h2>
@@ -113,12 +117,13 @@ th { color: var(--muted); font-weight: 600; }
   <li><strong>Rename…</strong> a person, for example someone not in your Contacts.</li>
 </ul>
 <p>These are kept for every export and only change the archive, never Messages or Contacts.</p>
+<p>A phone number or email is the same person in every app, so someone you text and also reach on WhatsApp is one person, and one conversation. A name or username another app uses (a WhatsApp id without a number, for example) stays that app's own until you <strong>Merge…</strong> it with the right person. A transcript says which of a person's numbers and names were joined by hand.</p>
 
 <h2 id="export">Export</h2>
 <p>Click <strong>Export…</strong>. Name the archive (the suggestion says what's in it) and choose:</p>
 <div class="table-wrap"><table>
   <tr><th>Format</th><th>What it is</th></tr>
-  <tr><td>Conversation pages (HTML)</td><td>Looks like Messages, with photos and videos in place. Opens in any browser.</td></tr>
+  <tr><td>Conversation pages (HTML)</td><td>Looks like Messages, with photos and videos in place. Opens in any browser. Your own messages carry the name set for transcripts (and the number or email they were sent from, when Messages records it); in a conversation over several apps, each message says how it was sent.</td></tr>
   <tr><td>Markdown</td><td>Plain text, one file per conversation: for reading, or to give an AI assistant.</td></tr>
   <tr><td>JSON</td><td>Structured data for research and other software.</td></tr>
   <tr><td>Legal transcript (PDF and HTML)</td><td>Numbered entries, attachments listed as exhibits with their SHA-256, Bates numbers and Page X of Y. Add the matter, who prepared it and for whom; they go on the cover page.</td></tr>
@@ -134,14 +139,16 @@ th { color: var(--muted); font-weight: 600; }
 <p>Each export is a new folder; nothing already on the disk is replaced.</p>
 <div class="table-wrap"><table>
   <tr><th>Item</th><th>What it holds</th></tr>
-  <tr><td><code>index.html</code></td><td>Start here: every conversation with its dates and counts, and links to each format. It also lists anything that couldn't be copied.</td></tr>
+  <tr><td><code>index.html</code></td><td>Start here: what was read, and every conversation with its counts, its sources (Messages, Signal…), its dates and links to each format. Type in its box to find a conversation.</td></tr>
+  <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the index. Only when there are some.</td></tr>
   <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
   <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
   <tr><td><code>Markdown/</code>, <code>JSON/</code></td><td>One file per conversation; <code>JSON/</code> also has <code>people.json</code> and <code>archive.json</code>.</td></tr>
   <tr><td><code>Attachments/</code></td><td>Photos, videos, voice notes and files, named by date, each dated as it was sent.</td></tr>
   <tr><td><code>manifest.json</code>, <code>SHA256SUMS.txt</code></td><td>The size and SHA-256 of every file, to prove nothing changed.</td></tr>
 </table></div>
-<p><strong>Missing attachments</strong> are ones Messages lists but whose file isn't on the Mac. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
+<p>If another app's messages couldn't be read during an export (see <a href="#plugins">Other apps</a>), the rest is exported, and the conversations that draw on that app are marked <strong>incomplete</strong> in the index, on their transcripts and in <code>archive.json</code>. Updating the archive later fills them in.</p>
+<p><strong>Missing attachments</strong> are ones the messages name but whose file wasn't where they were read from (for Messages, on the Mac); they're listed in <code>attachment-notes.html</code>, and each conversation's count in the index links there. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
 
 <h2 id="update">Update an archive</h2>
 <p><span class="menu">File › Update Archive…</span> (<kbd>⇧⌘U</kbd>), or <strong>Update an existing archive…</strong> on the dashboard, adds what's new since the archive was made, with the same choices. Only conversations with new or edited messages are rebuilt. The files it replaces go to the Trash (or, on a drive without one, to a <code>RYSYS Trash</code> folder on that drive).</p>
@@ -160,31 +167,50 @@ th { color: var(--muted); font-weight: 600; }
   <li>If the backup is encrypted, enter its password. It's used only to read the backup and is never saved; you enter it again next time.</li>
 </ol>
 <p>The backup is only read. With a backup, the dashboard's search covers names and numbers only, since a backup's messages aren't copied anywhere.</p>
+<p>With a backup chosen, plug-ins that can read backups (WhatsApp) read that backup too, since the phone keeps the whole history; the menu's <strong>Also read</strong> says so, for example "WhatsApp in “Alex’s iPhone” backup".</p>
+
+<h2 id="plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</h2>
+<p>Messages is built in. Other apps' messages are read by <strong>plug-ins</strong>, which you download from <a href="https://apps.rysys.net/?app=messagearchiver&amp;sys=macos">MessageArchiver's page</a> only if you use that app.</p>
+<ol>
+  <li>Download the plug-in (a <code>.maplugin</code> file) and double-click it, or choose <span class="menu">File › Install Plug-in…</span>.</li>
+  <li>MessageArchiver asks first, then installs it, if RYSYS signed it and nothing in it was changed since. Anything else is refused, with the reason.</li>
+  <li>The source menu (under the heading, or in the dashboard's toolbar) now has <strong>Also read</strong>: each app found, ticked. Untick one to leave it out.</li>
+</ol>
+<p>Someone you reach in two apps is one conversation, marked for example "Messages + WhatsApp", each message with how it was sent. Group chats stay separate. <strong>Manage Sources…</strong> in the same menu opens Settings at <strong>Sources</strong>: each plug-in, what it reads, its <strong>Instructions</strong> and <strong>Remove…</strong>.</p>
+<p>If a plug-in can't read its app (it stopped, or didn't answer), a notice says so with <strong>Try Again</strong>; everything else works as before. An updated plug-in from the same page usually fixes it.</p>
+<h3>WhatsApp</h3>
+<p>The WhatsApp plug-in reads WhatsApp for Mac's chats, or your iPhone's, from a Finder backup. WhatsApp on a Mac holds only what arrived after it was linked, and attachments only once they were opened there; a backup has the phone's whole history. One-to-one chats and groups are read; status updates and broadcast lists are not. Someone WhatsApp knows only by a hidden id, not a number, shows under the name they gave WhatsApp.</p>
+<h3>Signal</h3>
+<p>Signal isn't in iPhone backups, so the Signal plug-in reads the chat history Signal Desktop exports. In Signal Desktop, open <strong>Settings</strong> (the gear, lower left) › <strong>Chats</strong> › <strong>Export chat history</strong> and press <strong>Export</strong>: a folder named <code>signal-export-</code> and the date appears in Downloads. Then choose <strong>Signal: Choose an Export…</strong> in the source menu (or <strong>Choose…</strong> in Settings › Sources), and choose that folder, or Downloads to read the newest export in it. For a later update, export again: only what is new is added. One-to-one chats, groups and Note to Self are read, with reactions, replies, every version of an edited message, calls and group changes. Signal Desktop holds only what it got since it was linked, and the phone may not have sent it older photos; those are listed as missing. The export folder holds your messages unencrypted: keep it safe, or delete it once your archive is made.</p>
+<h3>Telegram</h3>
+<p>Telegram keeps your chats on its servers, so the Telegram plug-in reads the copy Telegram gives you: in Telegram for Mac, <strong>Settings</strong> › <strong>Data and Storage</strong> › <strong>Export Telegram Data</strong>; in Telegram Desktop, <strong>Settings</strong> › <strong>Advanced</strong> › <strong>Export Telegram data</strong>. Set <strong>Format</strong> to <strong>Machine-readable JSON</strong> (or Both: HTML alone can't be read) and <strong>Folder</strong> to <strong>Downloads</strong> (Telegram for Mac otherwise saves inside its own folder, where MessageArchiver can't look). The first export can take about a day to be ready. Then choose <strong>Telegram: Choose an Export…</strong> in the source menu, and the export's folder, or Downloads. One-to-one chats, groups, bots and Saved Messages are read; channels are not. Telegram's export has phone numbers only in your contacts, so a person is matched to Contacts by their number when their name matches one of your contacts, and otherwise listed by Telegram's id. An edited message is marked edited; Telegram doesn't keep its earlier versions. The export holds your messages unencrypted: keep it safe, or delete it once your archive is made.</p>
 
 <h2 id="settings">Settings</h2>
 <p><span class="menu">MessageArchiver › Settings…</span> (<kbd>⌘,</kbd>):</p>
 <ul>
   <li><strong>Permissions:</strong> Full Disk Access and Contacts, with Check Again.</li>
   <li><strong>Search index:</strong> its size and when it was updated; <strong>Update Now</strong>, or <strong>Delete…</strong> to move it to the Trash (it's made again when needed).</li>
+  <li><strong>Sources:</strong> Messages and each plug-in, with what it reads; <strong>Instructions</strong>, <strong>Remove…</strong>, <strong>Install Plug-in…</strong>, and the plug-ins' page.</li>
   <li><strong>Converters:</strong> what converts photos, audio and video. <code>sips</code> and <code>afconvert</code> come with macOS; <code>ffmpeg</code> is optional.</li>
   <li><strong>Appearance and skin:</strong> light, dark or automatic, and the app's colours. Skins are small JSON files you can export, edit and import.</li>
 </ul>
 
 <h2 id="privacy">Privacy and safety</h2>
 <ul>
-  <li><strong>Read only.</strong> MessageArchiver never changes Messages, its attachments, Contacts or an iPhone backup.</li>
+  <li><strong>Read only.</strong> MessageArchiver never changes Messages, its attachments, Contacts, an iPhone backup, or another app's data. A plug-in reads a copy of that app's files.</li>
+  <li><strong>Plug-ins</strong> run only if RYSYS signed them and nothing changed since, and each runs with no network access at all.</li>
   <li><strong>Offline.</strong> It makes no network connections. Nothing leaves your Mac; the link at the bottom only opens this page.</li>
   <li><strong>Never overwrites.</strong> A new export is a new folder. An update sends what it replaces to the Trash.</li>
-  <li><strong>Its own files</strong> are in <code>~/Library/Application Support/RYSYS4MAC/MessageArchiver/</code>: settings, your merges and names, and the search index (a copy of your messages' text, readable only by you). Delete that folder, and the app, to remove MessageArchiver completely.</li>
+  <li><strong>Its own files</strong> are in <code>~/Library/Application Support/RYSYS4MAC/MessageArchiver/</code>: settings, your merges and names, the search index (a copy of your messages' text, readable only by you), and <code>Plugins/</code>. Delete that folder, and the app, to remove MessageArchiver completely.</li>
 </ul>
 
 <h2 id="questions">Questions</h2>
 <h3>Why does the count of messages differ from Messages?</h3>
 <p>Tapbacks (hearts, thumbs up and the like) are shown on the message they react to rather than as messages of their own, and messages in more than one conversation are counted once.</p>
 <h3>Can I export just one conversation?</h3>
-<p>Yes: Select None, tick that conversation, and click Export…</p>
+<p>Yes: untick everything with the checkbox at the top of the list, tick that conversation, and click Export…</p>
 <h3>Is it free?</h3>
-<p>Yes. MessageArchiver is free software under the GNU GPL v3. It's built on <a href="https://github.com/ReagentX/imessage-exporter">imessage-exporter</a>'s library by ReagentX. The source link and third-party notices are in <span class="menu">MessageArchiver › About MessageArchiver</span>.</p>
+<p>Yes. MessageArchiver is free software under the GNU GPL v3. It's built on <a href="https://github.com/ReagentX/imessage-exporter">imessage-exporter</a>'s library by ReagentX. Its source code is at <a href="https://github.com/rysys-dev/MessageArchiver">github.com/rysys-dev/MessageArchiver</a>, and the third-party notices are in <span class="menu">MessageArchiver › About MessageArchiver</span>.</p>
 </main>
 </body>
 </html>

@@ -1,0 +1,9 @@
+{
+  "id": "telegram",
+  "name": "Telegram",
+  "version": "1.0.0",
+  "protocol": 2,
+  "minimum_app": "1.1.0",
+  "executable": "ma-telegram",
+  "cargo_package": "ma-telegram"
+}

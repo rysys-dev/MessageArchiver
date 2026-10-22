@@ -15,8 +15,12 @@ public enum ArchiveNaming {
     }
 
     /// `<Person or Group Name> (<short-id>)` (spec §9.1); the id keeps two "Jane Doe"s apart.
-    public static func threadFile(title: String, threadId: Int) -> String {
-        threadId == Selection.noConversation ? "Not in a conversation" : "\(sanitize(title, maxLength: 90)) (\(threadId))"
+    /// Messages' conversations keep 1.0's names, "Title (10)", so an update finds its files;
+    /// another source's carry its name, "Title (whatsapp 10)".
+    public static func threadFile(title: String, threadId: ThreadRef) -> String {
+        let source = threadId.source == .messages ? nil : sanitize(threadId.source.rawValue, maxLength: 30)
+        if threadId.isNoConversation { return "Not in a conversation" + (source.map { " (\($0))" } ?? "") }
+        return "\(sanitize(title, maxLength: 90)) (\(source.map { "\($0) " } ?? "")\(threadId.id))"
     }
 
     /// `YYYY-MM-DD_HHMMSS` in the message's local time, for attachment names.

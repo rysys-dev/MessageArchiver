@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Telegram plug-in for MessageArchiver</title>
+<style>body{font:15px -apple-system,sans-serif;max-width:38em;margin:2em auto;padding:0 1em;line-height:1.5}h2{font-size:1.05em;margin-top:1.6em}</style></head>
+<body>
+<h1>Telegram</h1>
+<p>This plug-in lets MessageArchiver read your Telegram chats, beside Messages. A person you
+talk to on both is one conversation, each message marked with how it was sent.</p>
+
+<h2>Bring your Telegram chats in</h2>
+<p>Telegram keeps your chats on its servers, so you ask Telegram for a copy, its data export.
+Telegram may ask you to confirm on your phone, and the first time it can make you wait about a
+day before the export is ready.</p>
+<p><b>Telegram for Mac</b> (the App Store app): <b>Settings</b> ▸ <b>Data and Storage</b> ▸
+<b>Export Telegram Data</b>. <b>Telegram Desktop</b>: <b>Settings</b> ▸ <b>Advanced</b> ▸
+<b>Export Telegram data</b>. In either:</p>
+<ol>
+<li>Tick the chats you want (personal chats, groups) and the photos, videos, voice messages and
+files to include.</li>
+<li>Set <b>Format</b> to <b>Machine-readable JSON</b>, or <b>Both</b>. The plug-in reads the
+JSON; HTML alone can’t be read.</li>
+<li>Set <b>Folder</b> to <b>Downloads</b>. Telegram for Mac otherwise saves inside its own
+folder in Library, where MessageArchiver can’t look.</li>
+<li>Press <b>Export</b>. A folder appears in Downloads (<code>Telegram_Export_</code> and the
+date, or <code>DataExport_</code> and the date in Telegram Desktop’s folder).</li>
+<li>In MessageArchiver, choose <b>Telegram: Choose an Export…</b> from the source menu (or
+<b>Choose…</b> in Settings ▸ Sources), and choose that folder, or Downloads itself: the newest
+export in it is read.</li>
+</ol>
+
+<h2>Later exports</h2>
+<p>Export again the same way and update your archive. Only what is new is added.</p>
+
+<h2>What is read</h2>
+<p>One-to-one chats, groups, bots and Saved Messages, with replies, reactions, calls and group
+changes. Channels are left out. Telegram’s export has phone numbers only in your contacts: a
+person whose name matches one of your contacts gets that number, so they are matched to Contacts
+and Messages; anyone else is listed by Telegram’s id with their name, and you can join them to
+the right person by hand in People. Telegram keeps only the last version of an edited message,
+so it is marked edited without its earlier versions. A file left out of the export (too large,
+or its kind not ticked) is listed as missing.</p>
+
+<h2>Keep the export safe</h2>
+<p>The export folder holds your messages unencrypted, and the details of your account. Once
+your archive is made, you may want to move the export somewhere safe, or delete it.</p>
+
+<h2>What it can’t do</h2>
+<p>It reads only: nothing in Telegram or the export is changed, and it has no network access at all.</p>
+</body></html>

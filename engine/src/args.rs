@@ -7,6 +7,8 @@ USAGE:
     ma-engine <command> [--source <chat.db or iOS backup folder>] [options]
 
 COMMANDS:
+    describe                    Who this engine is: protocol version, source id, name, kinds
+    probe                       What it finds: this Mac's Messages, or the --source given
     version                     Engine and imessage-database versions
     unlock                      Encrypted iOS backup: checks the password (stdin) and prints
                                 the key derived from it, for later commands
@@ -14,13 +16,14 @@ COMMANDS:
     threads                     One line per thread (chats with the same people merged)
     handles                     One line per handle (phone number or email)
     activity                    Messages and attachments per thread per local day
-    changes --since-rowid N [--edited-since ISO8601]
+    changes --since-rowid N [--edited-since ISO8601] [--services A,B]
                                 Threads with messages after rowid N (tapbacks included), or
                                 edited or unsent since the time: for incremental export
     messages [filters]          One line per message, oldest first
         --start YYYY-MM-DD      On or after this local date
         --end YYYY-MM-DD        Before this local date
         --threads ID,ID         Only these thread_ids (from `threads`)
+        --services A,B          Only messages sent over these services (iMessage, SMS, RCS…)
         --since-rowid N         Only messages with rowid greater than N
         --extract-to DIR        Encrypted iOS backup: decrypt attachments into DIR
 
@@ -34,12 +37,15 @@ pub struct MessageFilter {
     pub start: Option<String>,
     pub end: Option<String>,
     pub threads: Option<Vec<i32>>,
+    pub services: Option<Vec<String>>,
     pub since_rowid: Option<i32>,
     pub extract_to: Option<PathBuf>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
+    Describe,
+    Probe,
     Version,
     Help,
     Unlock,
@@ -47,7 +53,7 @@ pub enum Command {
     Threads,
     Handles,
     Activity,
-    Changes { since_rowid: i64, edited_since: Option<String> },
+    Changes { since_rowid: i64, edited_since: Option<String>, services: Option<Vec<String>> },
     Messages(MessageFilter),
 }
 
@@ -81,6 +87,14 @@ impl Args {
                         .collect::<Result<Vec<_>, _>>()?;
                     filter.threads = Some(ids);
                 }
+                "--services" if name == "messages" || name == "changes" => {
+                    let names: Vec<String> =
+                        value()?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    if names.is_empty() {
+                        return Err("--services needs at least one service".into());
+                    }
+                    filter.services = Some(names);
+                }
                 "--since-rowid" if name == "changes" => {
                     let v = value()?;
                     changes_since = Some(v.parse().map_err(|_| format!("not a rowid: {v}"))?);
@@ -100,6 +114,8 @@ impl Args {
         }
 
         let command = match name.as_str() {
+            "describe" => Command::Describe,
+            "probe" => Command::Probe,
             "version" | "--version" => Command::Version,
             "help" | "--help" | "-h" => Command::Help,
             "unlock" => Command::Unlock,
@@ -110,6 +126,7 @@ impl Args {
             "changes" => Command::Changes {
                 since_rowid: changes_since.ok_or_else(|| "changes needs --since-rowid".to_string())?,
                 edited_since,
+                services: filter.services.take(),
             },
             "messages" => Command::Messages(filter),
             other => return Err(format!("unknown command: {other}")),
@@ -134,12 +151,13 @@ mod tests {
 
     #[test]
     fn messages_filters() {
-        let args = parse("messages --source /x/chat.db --start 2024-01-01 --end 2024-02-01 --threads 3,7 --since-rowid 42 --extract-to /a/b").unwrap();
+        let args = parse("messages --source /x/chat.db --start 2024-01-01 --end 2024-02-01 --threads 3,7 --services iMessage,SMS --since-rowid 42 --extract-to /a/b").unwrap();
         assert_eq!(args.source, Some(PathBuf::from("/x/chat.db")));
         assert_eq!(args.command, Command::Messages(MessageFilter {
             start: Some("2024-01-01".into()),
             end: Some("2024-02-01".into()),
             threads: Some(vec![3, 7]),
+            services: Some(vec!["iMessage".into(), "SMS".into()]),
             since_rowid: Some(42),
             extract_to: Some(PathBuf::from("/a/b")),
         }));

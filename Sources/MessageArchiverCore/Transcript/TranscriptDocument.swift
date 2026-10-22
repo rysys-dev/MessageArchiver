@@ -57,7 +57,9 @@ struct TranscriptDocument {
             guard seen.insert(key).inserted else { continue }
             let person = p.personId.flatMap { people[$0] }
             let handles = (person?.handles ?? [p.handle]).joined(separator: ", ")
-            out.append("\(person?.name ?? p.name ?? p.handle) (\(handles))")
+            // Handles joined by hand (Milestone 16) say so: the record shows who decided.
+            let byHand = person.map { $0.joinedByHand.isEmpty ? "" : "; joined by hand: \($0.joinedByHand.joined(separator: ", "))" } ?? ""
+            out.append("\(person?.name ?? p.name ?? p.handle) (\(handles)\(byHand))")
         }
         return out
     }
@@ -71,7 +73,7 @@ struct TranscriptDocument {
         exportedStyle.timeZone = f.timeZone
         var lines: [(String, String)] = []
         if !options.matter.isEmpty { lines.append(("Matter", options.matter)) }
-        lines.append(("Conversation", "\(thread.title) (thread \(thread.id == Selection.noConversation ? "none" : String(thread.id)))"))
+        lines.append(("Conversation", "\(thread.title) (thread \(thread.id.isNoConversation ? "none" : thread.id.description))"))
         lines.append(("Participants", (participants() + ["\(ownerLabel) (the device owner)"]).joined(separator: "; ")))
         if !options.preparedBy.isEmpty { lines.append(("Prepared by", options.preparedBy)) }
         if !options.preparedFor.isEmpty { lines.append(("Prepared for", options.preparedFor)) }
@@ -79,9 +81,24 @@ struct TranscriptDocument {
         lines.append(("Source", "\(f.sourceKind), on \(f.device)"))
         lines.append(("Source database", f.sourcePath))
         lines.append((f.sourceHashLabel, f.sourceSHA256 ?? "(not computed)"))
+        // A conversation that draws on other sources names each, with its SHA-256 (Milestone 16).
+        let parts = Set(thread.parts.map(\.source))
+        for other in f.others where parts.contains(other.id) {
+            lines.append(("Also from", "\(other.description), \(other.path)"))
+            lines.append(("SHA-256", other.sha256 ?? "(not computed)"))
+        }
+        let unread = thread.parts.map(\.source).compactMap { f.failed[$0] }
+        if !unread.isEmpty {
+            lines.append(("Completeness", "INCOMPLETE. " + Array(Set(unread)).sorted().joined(separator: "; ")
+                          + ". Its messages in this conversation may be missing from this transcript."))
+        }
         lines.append(("Exported", f.exported.formatted(exportedStyle)))
         lines.append(("Time zone used", tzName))
         lines.append(("Scope", "\(f.range); \(Plural.count(f.conversationsInExport, "conversation")) in this export"))
+        let services = PlatformFilter.ordered(entries.filter { !$0.isEvent }.map(\.service))
+        var platforms = services.isEmpty ? "None" : PlatformFilter.list(services)
+        if let only = f.platforms { platforms += " (Platform filter: only \(PlatformFilter.list(only)) exported)" }
+        lines.append(("Platforms", platforms))
         let first = entries.first?.date, last = entries.last?.date
         let entryCount = entries.count == 1 ? "1 entry" : "\(entries.count.formatted()) entries"
         lines.append(("This transcript", "\(entryCount) · \(Plural.count(exhibitCount, "exhibit")) (\(missingCount) missing) · \(Self.timestamp(first)) to \(Self.timestamp(last))"))

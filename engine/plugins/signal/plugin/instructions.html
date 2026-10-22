@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Signal plug-in for MessageArchiver</title>
+<style>body{font:15px -apple-system,sans-serif;max-width:38em;margin:2em auto;padding:0 1em;line-height:1.5}h2{font-size:1.05em;margin-top:1.6em}</style></head>
+<body>
+<h1>Signal</h1>
+<p>This plug-in lets MessageArchiver read your Signal chats, beside Messages. A person you
+talk to on both is one conversation, each message marked with how it was sent.</p>
+
+<h2>Bring your Signal chats in</h2>
+<ol>
+<li>Install Signal Desktop and link it to your phone. When it offers to, transfer your message
+history from the phone.</li>
+<li>In Signal Desktop, open <b>Settings</b> (the gear, lower left) ▸ <b>Chats</b> ▸
+<b>Export chat history</b>, and press <b>Export</b>. Signal saves a folder named
+<code>signal-export-</code> and the date, in Downloads.</li>
+<li>In MessageArchiver, choose <b>Signal: Choose an Export…</b> from the source menu (or
+Settings ▸ Sources), and choose that folder, or Downloads itself: the newest export in it is read.</li>
+</ol>
+<p>Signal isn’t in iPhone backups, so on a Mac this export is the way in.</p>
+
+<h2>Later exports</h2>
+<p>Make a new export the same way and update your archive. Only what is new is added; a person,
+a conversation and a message keep the place they have in it. If you chose Downloads, the newest
+export there is read without choosing again.</p>
+
+<h2>What is read</h2>
+<p>One-to-one chats, groups and Note to Self, with reactions, replies, edits (every version),
+deleted messages, calls and group changes. Signal’s release notes and stories are left out.
+Someone Signal knows only by their Signal id, not a phone number, is listed by that id with the
+name they gave Signal, and isn’t matched to Contacts; you can join them to the right person by
+hand in People.</p>
+<p>Signal Desktop holds only what it has: what it got since it was linked, and what the phone
+transferred then, which may leave out older photos and files. Those are listed as missing.</p>
+
+<h2>Keep the export safe</h2>
+<p>The export folder holds your messages unencrypted, and Signal’s keys for your account. Once
+your archive is made, you may want to move the export somewhere safe, or delete it.
+MessageArchiver never copies the keys into an archive.</p>
+
+<h2>What it can’t do</h2>
+<p>It reads only: nothing in Signal or the export is changed, and it has no network access at all.</p>
+</body></html>

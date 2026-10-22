@@ -26,10 +26,26 @@ struct ConversationRenderer: Sendable {
     var names: [String: String]
     var timeZone: TimeZone = .current
     var locale: Locale = .current
+    /// The owner's name, as the transcript settings give it (2026-10-22): on their own
+    /// messages in place of "Me", which stays when it is empty.
+    var ownerName = ""
+    /// "Messages", "Signal": each source's name, for the header.
+    var sourceNames: [SourceID: String] = [:]
+
+    var me: String { ownerName.isEmpty ? "Me" : ownerName }
 
     func time(_ iso: String?) -> String {
         guard let iso, let date = try? Date(iso, strategy: .iso8601) else { return "" }
         var style = Date.FormatStyle(date: .abbreviated, time: .standard).locale(locale)
+        style.timeZone = timeZone
+        return date.formatted(style)
+    }
+
+    /// To the minute, for the archive's index (2026-10-22): seconds matter on the pages
+    /// and in transcripts, not in a list.
+    func minute(_ iso: String?) -> String {
+        guard let iso, let date = try? Date(iso, strategy: .iso8601) else { return "" }
+        var style = Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale)
         style.timeZone = timeZone
         return date.formatted(style)
     }
@@ -43,7 +59,12 @@ struct ConversationRenderer: Sendable {
 
     /// The sender's name, with the raw handle beside it (spec §8: evidence shows both).
     func senderHTML(_ m: ExportMessage) -> String {
-        if m.isFromMe { return "Me" }
+        // The owner as the other side is shown: a name, and the address it was sent from when
+        // the source records it (Messages does).
+        if m.isFromMe {
+            guard let from = m.destinationCallerId, !from.isEmpty else { return HTML.escape(me) }
+            return "\(HTML.escape(me)) <span class=\"handle\">\(HTML.escape(from))</span>"
+        }
         guard let handle = m.senderHandle else { return "Unknown" }
         if let name = names[handle], name != handle {
             return "\(HTML.escape(name)) <span class=\"handle\">\(HTML.escape(handle))</span>"
@@ -52,34 +73,32 @@ struct ConversationRenderer: Sendable {
     }
 
     func senderName(_ m: ExportMessage) -> String {
-        if m.isFromMe { return "Me" }
+        if m.isFromMe { return me }
         guard let handle = m.senderHandle else { return "Unknown" }
         return names[handle] ?? handle
     }
 
-    /// The top of a conversation page: the way back to the index, who, how much, and when.
-    func header(title: String, participants: [(name: String?, handle: String)], stats: ThreadStats, exported: String) -> String {
+    /// The top of a conversation page (2026-10-22): the way back to the index; who, and
+    /// from which sources; how much; when, to the minute (the bubbles keep their seconds), and
+    /// when it was exported.
+    func header(title: String, participants: [(name: String?, handle: String)], sources: [SourceID], stats: ThreadStats, exported: String) -> String {
         let people = participants.map { p in
             p.name.map { "\(HTML.escape($0)) (\(HTML.escape(p.handle)))" } ?? HTML.escape(p.handle)
         }.joined(separator: ", ")
+        let from = sources.map { sourceNames[$0] ?? $0.rawValue }.joined(separator: " + ")
         var out = "<nav class=\"back\"><a href=\"../index.html\">← Archive index</a></nav>\n"
         out += "<h1>\(HTML.escape(title))</h1>\n"
-        if !people.isEmpty { out += "<p>\(people)</p>\n" }
-        out += "<p>\(HTML.escape(summary(stats)))</p>\n"
-        out += "<p>Exported \(HTML.escape(exported))</p>"
+        out += "<p>\([people, HTML.escape(from)].filter { !$0.isEmpty }.joined(separator: " · "))</p>\n"
+        out += "<p>\(HTML.escape([Plural.count(stats.messages, "message"), Plural.count(stats.attachments, "attachment")].joined(separator: " · ")))</p>\n"
+        let range = [minute(stats.first), minute(stats.last)].filter { !$0.isEmpty }.joined(separator: " → ")
+        out += "<p>\(HTML.escape([range, "Exported \(exported)"].filter { !$0.isEmpty }.joined(separator: " · ")))</p>"
         return out
     }
 
-    /// "212 messages · 25 attachments · Oct 5, 2026 at 12:55:55 PM → Oct 16, 2026 at 7:44:40 PM"
-    func summary(_ s: ThreadStats) -> String {
-        let range = [time(s.first), time(s.last)].filter { !$0.isEmpty }.joined(separator: " → ")
-        return [Plural.count(s.messages, "message"), Plural.count(s.attachments, "attachment"), range]
-            .filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-
     /// `showSender`: the sender's name and handle go above the bubble when the sender changes;
-    /// the time stays in every bubble.
-    func message(_ m: ExportMessage, attachments: [RenderedAttachment], reply: QuotedReply?, showSender: Bool = true) -> String {
+    /// the time stays in every bubble. `showService`: in a conversation over several sources, the
+    /// service follows the time (colors alone can't tell SMS from WhatsApp).
+    func message(_ m: ExportMessage, attachments: [RenderedAttachment], reply: QuotedReply?, showSender: Bool = true, showService: Bool = false) -> String {
         if m.kind == "announcement" { return announcement(m) }
         let side = m.isFromMe ? "sent \(HTML.escape(m.service))" : "received"
         var out = "<div class=\"message\" id=\"m-\(HTML.escape(m.guid))\">\n"
@@ -88,6 +107,7 @@ struct ConversationRenderer: Sendable {
         }
         out += "<div class=\"\(side)\">\n"
         out += "<p><span class=\"timestamp\">\(HTML.escape(time(m.date)))</span>"
+        if showService { out += " <span class=\"service\">· \(HTML.escape(m.service))</span>" }
         if m.edited?.isEdited == true { out += " <span class=\"flag\">EDITED</span>" }
         if m.unsent { out += " <span class=\"flag\">UNSENT</span>" }
         if m.recovered { out += " <span class=\"flag\">RECOVERED</span>" }
@@ -188,7 +208,7 @@ struct ConversationRenderer: Sendable {
     func tapbacks(_ list: [ExportMessage.Tapback]) -> String {
         var out = "<div class=\"tapbacks\">\n<hr>\n<p>Tapbacks:</p>\n"
         for t in list {
-            let who = t.isFromMe ? "Me" : (t.from.map { names[$0] ?? $0 } ?? "Unknown")
+            let who = t.isFromMe ? me : (t.from.map { names[$0] ?? $0 } ?? "Unknown")
             var label = Self.tapbackNames[t.type] ?? t.type
             if t.type == "emoji", let e = t.emoji { label = "Reacted \(e)" }
             let action = t.action == "removed" ? "<s>\(HTML.escape(label))</s> (removed)" : "<b>\(HTML.escape(label))</b>"
@@ -218,6 +238,9 @@ struct ConversationRenderer: Sendable {
         case "background_removed": text = "\(who) removed the chat background."
         case "phone_number_changed": text = "\(who) changed their phone number."
         case "audio_kept": text = "\(who) kept an audio message."
+        // Another service's notice in the conversation (WhatsApp's security-code and
+        // encryption notices, Milestone 18): in its own words when it has them.
+        case "event": text = a["text"]?.string ?? "A notice from \(m.service)."
         default: text = "\(who) changed the conversation."
         }
         return text

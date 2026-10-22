@@ -246,6 +246,11 @@ struct DoneView: View {
                         Text("The pages written so far are complete files and say the export was stopped.")
                             .foregroundStyle(palette.flag)
                     }
+                    ForEach(r.failedSources, id: \.self) { failed in
+                        Text("Couldn’t be read: \(failed). Its conversations are written and marked incomplete; update the archive later to fill them in.")
+                            .foregroundStyle(palette.flag)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .monospacedDigit()
                 .multilineTextAlignment(.center)

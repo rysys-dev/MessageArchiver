@@ -144,6 +144,11 @@ pub fn run(source: &Source, filter: &MessageFilter, out: &mut Output) -> Result<
         if filter.since_rowid.is_some_and(|n| msg.rowid <= n) {
             continue;
         }
+        if let Some(services) = &filter.services
+            && !services.iter().any(|s| *s == msg.service().to_string())
+        {
+            continue;
+        }
         // Tapbacks and poll votes are shown on the message they belong to, as imessage-exporter does.
         if !msg.is_edited() && (msg.is_tapback() || msg.is_poll_vote() || msg.is_poll_update()) {
             continue;

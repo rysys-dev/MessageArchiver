@@ -5,6 +5,11 @@ import SwiftUI
 struct FullDiskAccessView: View {
     @Environment(AppState.self) private var state
 
+    /// Where the app is, to choose with + in System Settings.
+    private var appPath: String {
+        return Bundle.main.bundlePath
+    }
+
     var body: some View {
         StartLayout {
             CardHeading(symbol: "lock.shield",
@@ -15,7 +20,7 @@ struct FullDiskAccessView: View {
                     Button("Open System Settings") { state.openFullDiskAccessSettings() }
                 }
                 Step(number: 2, text: "Turn on MessageArchiver. If it isn’t in the list, click + and choose it:") {
-                    Text(Bundle.main.bundlePath)
+                    Text(appPath)
                         .font(.callout.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)

@@ -1,0 +1,195 @@
+//! ma-signal: MessageArchiver's Signal plug-in (Milestone 20). It reads the plain export Signal
+//! Desktop makes (Settings ▸ Chats ▸ Export chat history), read-only, and prints it in
+//! protocol 2 (docs/engine-protocol.md, docs/plugins.md): data on stdout, events on stderr.
+//!
+//! The first plug-in of the `export` kind: it finds nothing on the Mac by itself. The app asks
+//! the user for the export folder and gives it as `--source`.
+
+mod export;
+mod read;
+
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
+use chrono::{DateTime, Local};
+use ma_protocol::{Describe, Output, PROTOCOL, ProbeLine, done};
+use serde_json::json;
+
+use export::{Error, Export};
+use read::Filter;
+
+struct Args {
+    command: String,
+    source: Option<PathBuf>,
+    filter: Filter,
+}
+
+fn parse(raw: Vec<String>) -> Result<Args, Error> {
+    let mut it = raw.into_iter();
+    let command = it.next().ok_or_else(|| Error::new("usage", "no command given"))?;
+    let mut args = Args { command, source: None, filter: Filter::default() };
+    while let Some(flag) = it.next() {
+        let mut value = || it.next().ok_or_else(|| Error::new("usage", format!("{flag} needs a value")));
+        match flag.as_str() {
+            "--source" => args.source = Some(PathBuf::from(value()?)),
+            "--threads" => {
+                args.filter.threads = Some(
+                    value()?.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().parse().map_err(|_| Error::new("usage", format!("not a thread id: {s}")))).collect::<Result<_, _>>()?,
+                )
+            }
+            "--services" => args.filter.services = Some(value()?.split(',').map(|s| s.trim().to_string()).collect()),
+            "--start" => args.filter.start = Some(value()?),
+            "--end" => args.filter.end = Some(value()?),
+            "--since-rowid" => {
+                let v = value()?;
+                args.filter.since_rowid = Some(v.parse().map_err(|_| Error::new("usage", format!("not a rowid: {v}")))?);
+            }
+            "--edited-since" => args.filter.edited_since = Some(value()?),
+            // The export's files are read where they are: nothing is decrypted.
+            "--extract-to" => {
+                value()?;
+            }
+            other => return Err(Error::new("usage", format!("unknown option: {other}"))),
+        }
+    }
+    Ok(args)
+}
+
+fn main() -> ExitCode {
+    let mut out = Output::stdout();
+    let result = parse(std::env::args().skip(1).collect()).and_then(|args| run(&args, &mut out)).and_then(|count| {
+        out.flush()?;
+        Ok(count)
+    });
+    match result {
+        Ok(count) => {
+            done(count);
+            ExitCode::SUCCESS
+        }
+        Err(e) if e.code == "broken_pipe" => ExitCode::SUCCESS,
+        Err(e) => {
+            ma_protocol::error(e.code, &e.message);
+            ExitCode::from(e.exit_code())
+        }
+    }
+}
+
+/// The export folder: the one given, or, for the folder that holds exports (Downloads), the
+/// newest `signal-export-…` in it.
+fn folder(given: &Path) -> PathBuf {
+    if !given.join(export::MAIN).exists()
+        && let Ok(entries) = std::fs::read_dir(given)
+    {
+        let newest = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("signal-export-")) && p.join(export::MAIN).exists())
+            .max();
+        if let Some(newest) = newest {
+            return newest;
+        }
+    }
+    given.to_path_buf()
+}
+
+fn source(args: &Args) -> Result<PathBuf, Error> {
+    args.source.as_deref().map(folder).ok_or_else(|| Error::new("usage", "no Signal export given (--source <folder>)"))
+}
+
+fn run(args: &Args, out: &mut Output) -> Result<u64, Error> {
+    let mut line = |v: &dyn erased::Line| v.write(out);
+    match args.command.as_str() {
+        "describe" => {
+            line(&Describe {
+                protocol: PROTOCOL,
+                source: "signal".into(),
+                name: "Signal".into(),
+                engine: env!("CARGO_PKG_VERSION").into(),
+                kinds: vec!["export".into()],
+                services: vec![read::SERVICE.into()],
+            })?;
+            Ok(1)
+        }
+        "version" => {
+            line(&json!({ "engine": env!("CARGO_PKG_VERSION") }))?;
+            Ok(1)
+        }
+        // Nothing is found by itself: the export is wherever the user saved it.
+        "probe" if args.source.is_none() => Ok(0),
+        "probe" => {
+            line(&probe(&source(args)?))?;
+            Ok(1)
+        }
+        command => {
+            let export = Export::open(&source(args)?)?;
+            match command {
+                "diagnostics" => {
+                    line(&read::diagnostics(&export)?)?;
+                    Ok(1)
+                }
+                "threads" => read::threads(&export, &mut |l| line(l)),
+                "handles" => read::handles(&export, &mut |l| line(l)),
+                "activity" => read::activity(&export, &mut |l| line(l)),
+                "changes" => {
+                    if args.filter.since_rowid.is_none() {
+                        return Err(Error::new("usage", "changes needs --since-rowid"));
+                    }
+                    read::changes(&export, &args.filter, &mut |l| line(l))
+                }
+                "messages" => read::messages(&export, &args.filter, &mut |l| line(l)),
+                other => Err(Error::new("usage", format!("unknown command: {other}"))),
+            }
+        }
+    }
+}
+
+/// A folder the user chose: is it a Signal export, and from when. Nothing is read but its
+/// first line.
+fn probe(dir: &Path) -> ProbeLine {
+    let (status, detail) = match export::check(dir) {
+        Ok(true) => ("ready", None),
+        Ok(false) => ("not_readable", Some("this folder isn’t a Signal export: choose the “signal-export-…” folder Signal Desktop saved".to_string())),
+        Err(e) if e.code == "permission_denied" => ("permission_denied", Some(e.message)),
+        Err(e) => ("not_readable", Some(e.message)),
+    };
+    let made = (status == "ready").then(|| made(dir)).flatten();
+    ProbeLine {
+        kind: "export".into(),
+        path: dir.display().to_string(),
+        label: match made {
+            Some(d) => format!("Signal export of {d}"),
+            None => "Signal export".into(),
+        },
+        status: status.into(),
+        size: std::fs::metadata(dir.join(export::MAIN)).ok().map(|m| m.len()),
+        detail,
+    }
+}
+
+/// The export's date, from its first line: "October 22, 2026".
+fn made(dir: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut first = String::new();
+    std::io::BufReader::new(std::fs::File::open(dir.join(export::MAIN)).ok()?).read_line(&mut first).ok()?;
+    let header: serde_json::Value = serde_json::from_str(&first).ok()?;
+    let t = DateTime::from_timestamp_millis(export::int(header.get("backupTimeMs"))?)?;
+    Some(t.with_timezone(&Local).format("%B %-d, %Y").to_string())
+}
+
+/// Any line the protocol prints, written to stdout.
+mod erased {
+    use ma_protocol::Output;
+    use serde::Serialize;
+
+    pub trait Line {
+        fn write(&self, out: &mut Output) -> std::io::Result<()>;
+    }
+
+    impl<T: Serialize> Line for T {
+        fn write(&self, out: &mut Output) -> std::io::Result<()> {
+            out.line(self)
+        }
+    }
+}

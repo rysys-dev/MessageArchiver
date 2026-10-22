@@ -43,29 +43,41 @@ final class AppState {
     private(set) var engine = Engine.bundled()
     let converters = Converters.detect()
 
-    /// handle rowid → the person it belongs to, and person → the threads they are in.
-    private(set) var personOfHandle: [Int: Person] = [:]
-    private var threadsOfPerson: [String: (all: Set<Int>, oneToOne: Set<Int>)] = [:]
+    /// The rows of Conversations (Milestone 16): a thread, or one person's threads in several
+    /// sources; and each thread → its conversation.
+    private(set) var conversations: [Conversation] = []
+    private(set) var conversationOf: [ThreadRef: ThreadRef] = [:]
+    private var threadInfo: [ThreadRef: ThreadInfo] = [:]
+    /// handle → the person it belongs to, and person → the threads they are in.
+    private(set) var personOfHandle: [HandleRef: Person] = [:]
+    private var threadsOfPerson: [String: (all: Set<ThreadRef>, oneToOne: Set<ThreadRef>)] = [:]
     private var messagesOfPerson: [String: Int] = [:]
     /// Per thread, counted as they will be exported (tapbacks shown on their message), so the
     /// list, the top tens and the estimate always agree.
-    private var countsOfThread: [Int: (messages: Int, attachments: Int)] = [:]
+    private var countsOfThread: [ThreadRef: (messages: Int, attachments: Int)] = [:]
 
     // MARK: The choice
 
     /// The threads ticked for export: the one record of the choice. Ticking a person ticks
     /// their threads (spec §7).
-    var selectedThreads: Set<Int> = []
+    var selectedThreads: Set<ThreadRef> = []
     var range = DateRange()
     var excludeGroups = false
     /// Contacts only, not in Contacts, or all (R1): narrows the lists and what is exported.
     var contactsFilter = ContactsFilter.all {
         didSet { updateShown() }
     }
-    /// The conversations the filter lets through.
-    private(set) var shownThreads: Set<Int> = []
+    /// The services ticked (Milestone 14): narrows the lists, the counts and what is exported,
+    /// down to the messages inside a conversation.
+    var platforms = PlatformFilter() {
+        didSet { recount(); updateContentMatches() }
+    }
+    /// The services in this source's messages, in menu order.
+    private(set) var presentServices: [String] = []
+    /// The conversations the filters let through.
+    private(set) var shownThreads: Set<ThreadRef> = []
     /// What the export takes: ticked, and let through by the filter.
-    var exportSelection: Set<Int> { selectedThreads.intersection(shownThreads) }
+    var exportSelection: Set<ThreadRef> { selectedThreads.intersection(shownThreads) }
     var listMode = ListMode.conversations
     var search = "" {
         didSet { updateContentMatches() }
@@ -80,7 +92,7 @@ final class AppState {
     private(set) var indexProgress = (done: 0, total: 0)
     private(set) var indexError: String?
     /// For the text in the search box: conversation → messages that say it.
-    private(set) var contentMatches: [Int: Int] = [:]
+    private(set) var contentMatches: [ThreadRef: Int] = [:]
     private var contentTask: Task<Void, Never>?
     var destination: URL {
         didSet { save() }
@@ -112,8 +124,20 @@ final class AppState {
     /// The database the engine reads: this Mac's Messages, or an iPhone backup's folder
     /// (Milestone 11). A debug run can point elsewhere.
     var source: URL = AppPaths.messagesDatabase
+    /// This Mac's Messages database, which This Mac's Messages returns to; a debug run points
+    /// it at its stand-in.
+    var macDatabase = AppPaths.messagesDatabase
     /// The iPhone backup being read; nil for this Mac's Messages.
     private(set) var backup: IOSBackup?
+    /// Every engine and what it found (Milestone 15): Messages' own, then the others.
+    private(set) var sources: [RegisteredSource] = []
+    /// Other sources read beside Messages (Milestone 16): all of those found, unless left out
+    /// in the source menu; and each one's totals.
+    private(set) var leftOut: Set<SourceID> = []
+    /// While an iPhone backup is read (Milestone 19): what each plug-in that reads backups
+    /// found in it, read instead of its copy on this Mac.
+    private(set) var backupFinds: [SourceID: ProbeResult] = [:]
+    private(set) var otherDiagnostics: [SourceID: Diagnostics] = [:]
     /// The backups Finder has made on this Mac, for the source menu.
     private(set) var backups: [IOSBackup] = []
     /// An encrypted backup waiting for its password (the password sheet shows while set).
@@ -131,12 +155,14 @@ final class AppState {
         destination = saved.destination.map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
         exportOptions = saved.exportOptions
+        exportFolders = Dictionary(uniqueKeysWithValues: saved.exportFolders.map { (SourceID(rawValue: $0.key), URL(fileURLWithPath: $0.value)) })
         if exportOptions.transcript.ownerName.isEmpty { exportOptions.transcript.ownerName = NSFullUserName() }
         skins = skinStore.all()
         overrides = IdentityStore.load()
         liveIndexInfo = LiveIndex.info()
         loading = false
         checkPermissions()
+        Task { await discoverSources() }
         // Contacts is read afresh on every read; this also catches a contact added or edited
         // while the dashboard is open, so its name appears without Read Again.
         NotificationCenter.default.addObserver(forName: .CNContactStoreDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -154,7 +180,7 @@ final class AppState {
     /// Looks again (at launch, on Check Again, and whenever the app comes to the front, since
     /// the user may have just changed it in System Settings) and moves on when it can.
     func checkPermissions() {
-        fullDiskAccess = FullDiskAccess.status(of: source)
+        fullDiskAccess = FullDiskAccess.status(of: permissionTarget)
         contacts = ContactsAccess.status
         route()
     }
@@ -233,24 +259,24 @@ final class AppState {
             async let t = engine.threads(source: source)
             async let h = engine.handles(source: source)
             async let a = engine.activity(source: source)
+            async let o = readOthers()
             let (threads, handles, activity) = try await (t, h, a)
+            let others = await o
             readingStage = "Reading Contacts…"
             let cards = await contactCards()
             let firstRead = self.threads.isEmpty
             self.diagnostics = d
-            self.threads = (threads + Self.noConversationRow(activity)).sorted { ($0.lastDate ?? "") > ($1.lastDate ?? "") }
-            self.handles = handles
-            self.activity = activity
-            var counts: [Int: (messages: Int, attachments: Int)] = [:]
-            for day in activity {
-                let t = day.threadId ?? Selection.noConversation
-                counts[t, default: (0, 0)].messages += day.messages
-                counts[t, default: (0, 0)].attachments += day.attachments
-            }
-            self.countsOfThread = counts
+            self.otherDiagnostics = others.diagnostics
+            var all = threads + Self.noConversationRow(activity, in: engine.sourceID)
+            for (id, read) in others.read { all += read.threads + Self.noConversationRow(read.activity, in: id) }
+            self.threads = all.sorted { ($0.lastDate ?? "") > ($1.lastDate ?? "") }
+            self.handles = handles + others.read.values.flatMap(\.handles)
+            self.activity = activity + others.read.values.flatMap(\.activity)
+            // Every source's services: the Platform menu lists WhatsApp beside iMessage.
+            presentServices = PlatformFilter.ordered(self.activity.compactMap(\.service))
             self.cards = cards
-            resolvePeople()
-            if firstRead || selectedThreads.isEmpty { selectedThreads = Set(self.threads.map(\.threadId)) }
+            recount()
+            if firstRead || selectedThreads.isEmpty { selectedThreads = Set(self.threads.map(\.ref)) }
             phase = .dashboard
             Task { await refreshLiveIndex() }
         } catch let error as EngineError where error.isPermissionDenied {
@@ -262,12 +288,51 @@ final class AppState {
     }
 
     /// The messages that belong to no conversation, as one more row (decision Q8).
-    private static func noConversationRow(_ activity: [ActivityDay]) -> [ThreadInfo] {
+    private static func noConversationRow(_ activity: [ActivityDay], in source: SourceID) -> [ThreadInfo] {
         let days = activity.filter { $0.threadId == nil }.map(\.day).sorted()
         guard let first = days.first, let last = days.last else { return [] }
-        return [ThreadInfo(threadId: Selection.noConversation, chatIds: [], chatIdentifiers: [], displayName: "Not in a conversation",
+        return [ThreadInfo(threadId: ThreadRef.noConversation(in: source).id, chatIds: [], chatIdentifiers: [], displayName: "Not in a conversation",
                            services: [], isGroup: false, participants: [], messageCount: 0, attachmentCount: 0,
-                           firstDate: "\(first)T12:00:00Z", lastDate: "\(last)T12:00:00Z")]
+                           firstDate: "\(first)T12:00:00Z", lastDate: "\(last)T12:00:00Z", source: source)]
+    }
+
+    typealias OtherRead = (threads: [ThreadInfo], handles: [HandleInfo], activity: [ActivityDay])
+
+    /// Every other source taken, read at once, each on its own (Milestone 16): one that fails
+    /// is marked failed with its notice, and the rest are read as if it weren't there.
+    private func readOthers() async -> (read: [SourceID: OtherRead], diagnostics: [SourceID: Diagnostics]) {
+        let taken = otherSourcesTaken
+        let results = await withTaskGroup(of: (SourceID, Result<(Diagnostics, OtherRead), Error>).self) { group in
+            for (other, found) in taken {
+                let engine = other.engine, url = URL(fileURLWithPath: found.path)
+                group.addTask {
+                    do {
+                        let d = try await engine.diagnostics(source: url)
+                        async let t = engine.threads(source: url)
+                        async let h = engine.handles(source: url)
+                        async let a = engine.activity(source: url)
+                        return (other.id, .success((d, try await (t, h, a))))
+                    } catch {
+                        return (other.id, .failure(error))
+                    }
+                }
+            }
+            var out: [(SourceID, Result<(Diagnostics, OtherRead), Error>)] = []
+            for await r in group { out.append(r) }
+            return out
+        }
+        var read: [SourceID: OtherRead] = [:]
+        var diagnostics: [SourceID: Diagnostics] = [:]
+        for (id, result) in results {
+            switch result {
+            case .success(let (d, r)):
+                read[id] = r
+                diagnostics[id] = d
+            case .failure(let error):
+                markFailed(id, error)
+            }
+        }
+        return (read, diagnostics)
     }
 
     private func contactCards() async -> [ContactCard] {
@@ -280,43 +345,105 @@ final class AppState {
         resolvePeople()
     }
 
+    /// Per-thread counts for the ticked services, then everything that follows from them.
+    private func recount() {
+        var counts: [ThreadRef: (messages: Int, attachments: Int)] = [:]
+        for day in activity where platforms.matches(day.service) {
+            counts[day.ref, default: (0, 0)].messages += day.messages
+            counts[day.ref, default: (0, 0)].attachments += day.attachments
+        }
+        countsOfThread = counts
+        resolvePeople()
+    }
+
     private func resolvePeople() {
         people = Identities.resolve(handles: handles, cards: cards, overrides: overrides)
         personOfHandle = [:]
         for person in people {
             for id in person.handleIDs { personOfHandle[id] = person }
         }
-        var all: [String: Set<Int>] = [:], oneToOne: [String: Set<Int>] = [:], messages: [String: Int] = [:]
+        var all: [String: Set<ThreadRef>] = [:], oneToOne: [String: Set<ThreadRef>] = [:], messages: [String: Int] = [:]
         for thread in threads {
-            let members = Set(thread.participants.compactMap { personOfHandle[$0.handleId]?.id })
+            let members = Set(thread.participants.compactMap { personOfHandle[thread.handle($0)]?.id })
             for id in members {
-                all[id, default: []].insert(thread.threadId)
-                if !thread.isGroup { oneToOne[id, default: []].insert(thread.threadId) }
+                all[id, default: []].insert(thread.ref)
+                if !thread.isGroup { oneToOne[id, default: []].insert(thread.ref) }
                 messages[id, default: 0] += self.messages(in: thread)
             }
         }
         threadsOfPerson = Dictionary(uniqueKeysWithValues: people.map { ($0.id, (all[$0.id] ?? [], oneToOne[$0.id] ?? [])) })
         messagesOfPerson = messages
+        conversations = Conversations.group(threads, personOf: { self.personOfHandle[$0]?.id },
+                                            messages: { self.countsOfThread[$0]?.messages ?? 0 })
+        conversationOf = Conversations.index(conversations)
+        threadInfo = Dictionary(threads.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         updateShown()
     }
 
     private func updateShown() {
         let filter = hasContactNames ? contactsFilter : .all
+        // With services left out, a conversation shows only if it has messages in the others.
         shownThreads = Set(threads.filter { t in
             filter.matches(t) { personOfHandle[$0]?.inContacts == true }
-        }.map(\.threadId))
+                && (platforms.isAll || (countsOfThread[t.ref]?.messages ?? 0) > 0)
+        }.map(\.ref))
     }
 
-    /// Select All / None act on the rows in view: the filter's, narrowed by the search.
+    /// The header checkbox acts on the rows in view: the filter's, narrowed by the search.
     func selectAllShown() { selectedThreads.formUnion(visibleThreads) }
     func selectNoneShown() { selectedThreads.subtract(visibleThreads) }
 
-    var visibleThreads: Set<Int> {
+    /// The lists' header checkbox (2026-10-22, in place of Select All and Select None):
+    /// on when everything shown is ticked, off when nothing is, mixed between.
+    var visibleTick: Tick {
+        let shown = visibleThreads
+        if shown.isEmpty || shown.isDisjoint(with: selectedThreads) { return .off }
+        return shown.isSubset(of: selectedThreads) ? .on : .mixed
+    }
+
+    /// Clicked: everything shown ticked, or, when it all is, nothing (a mixed one ticks all, as
+    /// Mail and Finder do).
+    func toggleVisible() {
+        if visibleTick == .on { selectNoneShown() } else { selectAllShown() }
+    }
+
+    var visibleThreads: Set<ThreadRef> {
         guard listMode == .conversations, !search.trimmingCharacters(in: .whitespaces).isEmpty else {
             return listMode == .people ? Set(people.filter(matchesSearch).flatMap { threads(of: $0) }).intersection(shownThreads) : shownThreads
         }
-        return Set(threads.filter { shownThreads.contains($0.threadId) && matchesSearch($0) }.map(\.threadId))
+        return Set(conversations.filter(matchesSearch).flatMap(\.parts)).intersection(shownThreads)
     }
+
+    // MARK: Conversations (Milestone 16)
+
+    /// The conversations with a part the filters let through.
+    var shownConversations: [Conversation] { conversations.filter { !shownThreads.isDisjoint(with: $0.parts) } }
+
+    func info(_ ref: ThreadRef) -> ThreadInfo? { threadInfo[ref] }
+
+    /// Its parts the filters let through: what its row counts, ticks and exports.
+    func shownParts(_ c: Conversation) -> [ThreadRef] { c.parts.filter(shownThreads.contains) }
+
+    func title(of c: Conversation) -> String { info(c.id).map(title(of:)) ?? "Conversation" }
+
+    func messages(in c: Conversation) -> Int { shownParts(c).reduce(0) { $0 + (countsOfThread[$1]?.messages ?? 0) } }
+    func attachments(in c: Conversation) -> Int { shownParts(c).reduce(0) { $0 + (countsOfThread[$1]?.attachments ?? 0) } }
+    func lastDate(of c: Conversation) -> String { c.parts.compactMap { info($0)?.lastDate }.max() ?? "" }
+
+    func isTicked(_ c: Conversation) -> Bool {
+        let parts = shownParts(c)
+        return !parts.isEmpty && Set(parts).isSubset(of: selectedThreads)
+    }
+
+    func toggle(_ c: Conversation) {
+        let parts = shownParts(c)
+        if isTicked(c) { selectedThreads.subtract(parts) } else { selectedThreads.formUnion(parts) }
+    }
+
+    /// The conversations the export takes: those with a part ticked and shown.
+    var exportConversations: [Conversation] { conversations.filter { !exportSelection.isDisjoint(with: $0.parts) } }
+
+    func matchesSearch(_ c: Conversation) -> Bool { c.parts.compactMap(info).contains(where: matchesSearch) }
 
     /// A conversation matches by its name or handles, or by what its messages say.
     func matchesSearch(_ t: ThreadInfo) -> Bool {
@@ -324,7 +451,7 @@ final class AppState {
         if needle.isEmpty { return true }
         if title(of: t).lowercased().contains(needle) { return true }
         if t.participants.contains(where: { ($0.handle ?? "").lowercased().contains(needle) }) { return true }
-        return (contentMatches[t.threadId] ?? 0) > 0
+        return (contentMatches[t.ref] ?? 0) > 0
     }
 
     func matchesSearch(_ p: Person) -> Bool {
@@ -373,7 +500,8 @@ final class AppState {
         contentTask = Task {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            let found = await Task.detached { liveSearch.threadMatches(text) }.value
+            let platforms = platforms
+            let found = await Task.detached { liveSearch.threadMatches(text, platforms: platforms) }.value
             guard !Task.isCancelled else { return }
             contentMatches = found
         }
@@ -383,23 +511,26 @@ final class AppState {
 
     func title(of thread: ThreadInfo) -> String {
         if let name = thread.displayName, !name.isEmpty { return name }
-        let names = thread.participants.map { p in personOfHandle[p.handleId]?.displayName ?? p.handle ?? "Unknown" }
+        let names = thread.participants.map { p in personOfHandle[thread.handle(p)]?.displayName ?? p.handle ?? "Unknown" }
         if names.isEmpty { return thread.chatIdentifiers.first ?? "Conversation \(thread.threadId)" }
         return Array(Set(names)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }.joined(separator: ", ")
     }
 
-    func threads(of person: Person) -> Set<Int> {
+    func threads(of person: Person) -> Set<ThreadRef> {
         let t = threadsOfPerson[person.id]
         return (excludeGroups ? t?.oneToOne : t?.all) ?? []
     }
 
-    func messages(in thread: ThreadInfo) -> Int { countsOfThread[thread.threadId]?.messages ?? 0 }
-    func attachments(in thread: ThreadInfo) -> Int { countsOfThread[thread.threadId]?.attachments ?? 0 }
+    func messages(in thread: ThreadInfo) -> Int { countsOfThread[thread.ref]?.messages ?? 0 }
+    func attachments(in thread: ThreadInfo) -> Int { countsOfThread[thread.ref]?.attachments ?? 0 }
 
     /// Names come from Contacts (or a debug run's stand-in).
     var hasContactNames: Bool { contacts == .allowed || debugCards != nil }
 
-    func conversationCount(of person: Person) -> Int { threadsOfPerson[person.id]?.all.count ?? 0 }
+    /// Their conversations with messages on the ticked platforms.
+    func conversationCount(of person: Person) -> Int {
+        (threadsOfPerson[person.id]?.all ?? []).count { platforms.isAll || (countsOfThread[$0]?.messages ?? 0) > 0 }
+    }
     func messageCount(of person: Person) -> Int { messagesOfPerson[person.id] ?? 0 }
 
     enum Tick { case on, off, mixed }
@@ -416,10 +547,32 @@ final class AppState {
         if tick(of: person) == .on { selectedThreads.subtract(mine) } else { selectedThreads.formUnion(mine) }
     }
 
-    var estimate: Estimate { Selection.estimate(activity, threads: exportSelection, range: range.days()) }
+    var estimate: Estimate {
+        Selection.estimate(activity, threads: exportSelection, range: range.days(), platforms: platforms, conversationOf: conversationOf)
+    }
 
     var months: [(month: String, messages: Int)] {
-        Selection.months(activity, threads: exportSelection, range: range.days())
+        Selection.months(activity, threads: exportSelection, range: range.days(), platforms: platforms)
+    }
+
+    /// Shows or hides one service's messages; the last ticked one stays.
+    func toggle(service: String) {
+        if platforms.hidden.contains(service) {
+            platforms.hidden.remove(service)
+        } else if presentServices.contains(where: { $0 != service && platforms.matches($0) }) {
+            platforms.hidden.insert(service)
+        }
+    }
+
+    /// "All platforms", or how many are ticked.
+    var platformsLabel: String {
+        platforms.isAll ? "All platforms" : PlatformFilter.label(shown: presentServices.filter(platforms.matches).count, of: presentServices.count)
+    }
+
+    /// Most messages' name, clicked: People, narrowed to that person by name.
+    func show(_ person: Person) {
+        listMode = .people
+        search = person.displayName
     }
 
     var topPeople: [Person] {
@@ -450,10 +603,11 @@ final class AppState {
     var defaultArchiveName: String {
         let selection = exportSelection
         let days = range.days()
-        let firstDay = activity.lazy.filter { selection.contains($0.threadId ?? Selection.noConversation) && $0.messages > 0 }
+        let firstDay = activity.lazy.filter { selection.contains($0.ref) && $0.messages > 0 && self.platforms.matches($0.service) }
             .map(\.day).min()
-        let only = selection.count == 1 ? threads.first { selection.contains($0.threadId) }.map(title(of:)) : nil
-        return ArchiveNaming.defaultName(conversations: selection.count, ofAll: threads.count, onlyTitle: only,
+        let chosen = exportConversations
+        let only = chosen.count == 1 ? chosen.first.map(title(of:)) : nil
+        return ArchiveNaming.defaultName(conversations: chosen.count, ofAll: conversations.count, onlyTitle: only,
                                          from: days.from, to: days.to, firstDay: firstDay)
     }
 
@@ -471,17 +625,19 @@ final class AppState {
     }
 
     func export(named name: String) {
-        let all = Set(threads.map(\.threadId))
+        let all = Set(threads.map(\.ref))
         let selection = exportSelection
-        let chosen = threads.filter { selection.contains($0.threadId) }
+        let chosen = exportConversations.map { c in exportThread(c, parts: c.parts.filter(selection.contains)) }
         let days = range.days()
         var request = ExportRequest(
             destination: destination, archiveName: name.isEmpty ? defaultArchiveName : name,
-            threads: chosen.map(exportThread), allThreads: selection == all,
+            threads: chosen, allThreads: selection == all,
             from: days.from, to: days.to, options: exportOptions, names: handleNames,
             source: source == AppPaths.messagesDatabase ? nil : source, expectedMessages: estimate.messages,
             people: exportPeople)
         request.backup = backup
+        request.others = exportSources
+        request.services = platforms.services(of: presentServices)
         request.choice = currentChoice
         run(request)
     }
@@ -492,7 +648,8 @@ final class AppState {
         let days = range.days()
         let filter = hasContactNames ? contactsFilter : .all
         return ArchiveState.Choice(allThreads: exportSelection == shownThreads, threads: exportSelection.sorted(),
-                                   from: days.from, to: days.to, contactsFilter: filter)
+                                   from: days.from, to: days.to, contactsFilter: filter,
+                                   services: platforms.services(of: presentServices))
     }
 
     private func run(_ request: ExportRequest) {
@@ -523,7 +680,8 @@ final class AppState {
     struct UpdatePlan: Identifiable {
         var root: URL
         var state: ArchiveState
-        var threads: [ThreadInfo]
+        /// The conversations to rebuild.
+        var threads: [Conversation]
         var newMessages: Int
         var edited: Int
         var differences: [String]
@@ -551,23 +709,42 @@ final class AppState {
             inform("This folder can’t be updated", UpdateError.notAnArchive(root.path).localizedDescription)
             return
         }
-        guard state.source.path == source.path else {
-            inform("This archive can’t be updated here", UpdateError.otherSource(state.source.path).localizedDescription)
+        // Each source updates from its own database (Milestone 13): the one it was made from.
+        guard let made = state.source(engine.sourceID), made.path == source.path else {
+            let other = state.source(engine.sourceID)?.path ?? state.allSources.first?.path ?? ""
+            inform("This archive can’t be updated here", UpdateError.otherSource(other).localizedDescription)
             return
         }
         if threads.isEmpty { await readMessages() }
         do {
-            let changes = try await engine.changes(sinceRowid: state.lastRowid, editedSince: state.lastRunStarted,
+            var changes = try await engine.changes(sinceRowid: made.position, editedSince: made.runStarted, services: state.choice.services,
                                                    source: source == AppPaths.messagesDatabase ? nil : source)
-            let changed = Set(changes.map { $0.threadId ?? Selection.noConversation })
+            // Each other source from its own cursor (Milestone 16); one the archive doesn't know
+            // yet from the start. A source read from another file than the archive's is left
+            // out, and one that fails is marked failed: the rest still update.
+            for (other, found) in otherSourcesTaken {
+                let known = state.source(other.id)
+                // A service's export (Milestone 20) updates from a newer export, wherever it is.
+                guard known == nil || known?.path == found.path || found.kind == "export" else { continue }
+                do {
+                    changes += try await other.engine.changes(sinceRowid: known?.position ?? 0, editedSince: known?.runStarted,
+                                                              services: state.choice.services, source: URL(fileURLWithPath: found.path))
+                } catch {
+                    markFailed(other.id, error)
+                }
+            }
+            let changed = Set(changes.map(\.ref))
+            // A conversation left incomplete by a source that failed last time is rebuilt too.
+            let incomplete = Set(state.threads.filter { $0.incomplete == true }.map(\.id))
             let filter = state.choice.contactsFilter
-            let wanted = threads.filter { t in
-                guard changed.contains(t.threadId) else { return false }
-                if !state.choice.allThreads { return state.choice.threads.contains(t.threadId) }
+            let wanted = conversations.filter { c in
+                guard incomplete.contains(c.id) || c.parts.contains(where: changed.contains) else { return false }
+                if !state.choice.allThreads { return c.parts.contains(where: state.choice.threads.contains) }
+                guard let t = info(c.id) else { return false }
                 return !hasContactNames || filter.matches(t) { personOfHandle[$0]?.inContacts == true }
             }
-            let ids = Set(wanted.map(\.threadId))
-            let relevant = changes.filter { ids.contains($0.threadId ?? Selection.noConversation) }
+            let ids = Set(wanted.flatMap(\.parts))
+            let relevant = changes.filter { ids.contains($0.ref) }
             updatePlan = UpdatePlan(root: root, state: state, threads: wanted,
                                     newMessages: relevant.reduce(0) { $0 + $1.new }, edited: relevant.reduce(0) { $0 + $1.edited },
                                     differences: state.differences(from: exportOptions, choice: currentChoice))
@@ -581,13 +758,15 @@ final class AppState {
         updatePlan = nil
         var request = ExportRequest(
             destination: plan.root.deletingLastPathComponent(), archiveName: plan.state.archiveName,
-            threads: plan.threads.map(exportThread), allThreads: false,
+            threads: plan.threads.map { exportThread($0, parts: $0.parts) }, allThreads: false,
             from: plan.state.choice.from, to: plan.state.choice.to, options: plan.state.options, names: handleNames,
             source: source == AppPaths.messagesDatabase ? nil : source,
             expectedMessages: plan.threads.reduce(0) { $0 + messages(in: $1) }, people: exportPeople)
         request.update = plan.root
         request.newMessages = plan.newMessages
         request.backup = backup
+        request.others = exportSources
+        request.services = plan.state.choice.services
         request.choice = plan.state.choice
         run(request)
     }
@@ -638,16 +817,25 @@ final class AppState {
         }
     }
 
-    private func exportThread(_ t: ThreadInfo) -> ExportThread {
-        let participants = t.participants.map { p in
-            ExportThread.Participant(name: personOfHandle[p.handleId]?.name, handle: p.handle ?? "Unknown",
-                                     personId: personOfHandle[p.handleId]?.id)
+    /// A conversation as the export names it: its first thread's title and folder, and the
+    /// participants of every part taken (one person, over each source's handles).
+    private func exportThread(_ c: Conversation, parts: [ThreadRef]) -> ExportThread {
+        let infos = (parts.contains(c.id) ? [] : [c.id]).compactMap(info) + parts.compactMap(info)
+        var seen = Set<String>()
+        let participants = infos.flatMap { t in
+            t.participants.map { p in
+                ExportThread.Participant(name: personOfHandle[t.handle(p)]?.name, handle: p.handle ?? "Unknown",
+                                         personId: personOfHandle[t.handle(p)]?.id)
+            }
+        }.filter { seen.insert($0.handle).inserted }
+        guard let t = info(c.id) else {
+            return ExportThread(id: c.id, title: "Conversation", folder: "Conversation", participants: participants, parts: parts)
         }
         let title = title(of: t)
-        let folder = t.isGroup || t.threadId == Selection.noConversation
+        let folder = t.isGroup || t.ref.isNoConversation
             ? title
-            : (t.participants.first.flatMap { personOfHandle[$0.handleId]?.displayName } ?? title)
-        return ExportThread(id: t.threadId, title: title, folder: folder, participants: participants, isGroup: t.isGroup)
+            : (t.participants.first.flatMap { personOfHandle[t.handle($0)]?.displayName } ?? title)
+        return ExportThread(id: c.id, title: title, folder: folder, participants: participants, isGroup: t.isGroup, parts: parts)
     }
 
     // MARK: Identities (spec §8)
@@ -733,6 +921,7 @@ final class AppState {
         settings.contactsAsked = contactsAsked
         settings.destination = destination.path
         settings.exportOptions = exportOptions
+        settings.exportFolders = Dictionary(uniqueKeysWithValues: exportFolders.map { ($0.key.rawValue, $0.value.path) })
         try? SettingsStore.save(settings)
     }
 
@@ -740,13 +929,226 @@ final class AppState {
 
     var sourceLabel: String { backup?.label ?? "This Mac’s Messages" }
 
+    /// Full Disk Access is checked on the Messages database or backup being read.
+    private var permissionTarget: URL { source }
+
+    // MARK: Other sources (Milestone 15)
+
+    /// The engines beside Messages' own, introduced and probed, each on its own.
+    func discoverSources() async {
+        // Installed plug-ins (Milestone 17) whose signature checks out run, sandboxed; the rest
+        // are listed as failed, with why.
+        plugins = PluginStore.installed()
+        let rejected = plugins.filter { $0.problem != nil }.map { p in
+            RegisteredSource(id: p.manifest?.id ?? SourceID(rawValue: p.folder.lastPathComponent), name: p.name,
+                             engine: Engine(executable: p.executable ?? p.folder, sourceID: ""), description: nil, found: [],
+                             status: .failed(p.problem ?? ""))
+        }
+        let engines = [Engine.bundled()].compactMap { $0 } + PluginStore.engines(plugins) + Engine.extras()
+        isDiscovering = true
+        await SourceRegistry.discover(engines, chosen: exportFolders) { found in await MainActor.run { self.sources = found + rejected } }
+        isDiscovering = false
+        await refreshBackupFinds()
+        // A source found after the dashboard was read joins it.
+        if phase == .dashboard, !otherSourcesTaken.isEmpty { await readMessages() }
+    }
+
+    private(set) var isDiscovering = false
+
+    // MARK: Exports (Milestone 20)
+
+    /// The folder chosen for each source of the `export` kind, probed on every launch.
+    private(set) var exportFolders: [SourceID: URL] = [:]
+
+    /// Sources that read a file the service exports: nothing is found without a folder chosen.
+    var exportKindSources: [RegisteredSource] {
+        sources.filter { $0.description?.kinds.contains("export") == true && !$0.isFailed }
+    }
+
+    /// "Choose a Signal export…": a folder panel, then the plug-in's probe of what was chosen.
+    /// Only a folder it can read is remembered; the source is introduced again with it.
+    func chooseExport(for source: RegisteredSource) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose the export \(source.name) saved (a folder), or the folder it saves to, to read the newest one there."
+        panel.directoryURL = exportFolders[source.id]?.deletingLastPathComponent()
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                let found = try await source.engine.probe(source: url)
+                guard found.contains(where: \.isReady) else {
+                    inform("\(source.name) can’t read this folder", found.first?.detail ?? "It isn’t an export \(source.name) made.")
+                    return
+                }
+                exportFolders[source.id] = url
+                save()
+                await reintroduce(source)
+            } catch {
+                inform("\(source.name) can’t read this folder", SourceRegistry.reason(error))
+            }
+        }
+    }
+
+    /// Stops reading a source's export; its archives keep what it read.
+    func forgetExport(for source: RegisteredSource) {
+        exportFolders[source.id] = nil
+        save()
+        Task { await reintroduce(source) }
+    }
+
+    private func reintroduce(_ source: RegisteredSource) async {
+        guard let i = sources.firstIndex(where: { $0.engine.executable == source.engine.executable }) else { return }
+        // The source's own engine, so a plug-in stays sandboxed and keeps its time limits.
+        sources[i] = await SourceRegistry.introduce(sources[i].engine, chosen: exportFolders)
+        if phase == .dashboard { await readMessages() }
+    }
+
+    /// The plug-ins folder's contents, checked (Milestone 17).
+    private(set) var plugins: [InstalledPlugin] = []
+
+    /// Settings opens at Sources (from Manage Sources… and Install Plug-in…).
+    var settingsShowsSources = false
+
+    /// Installs a `.maplugin` the user chose or opened in Finder, after saying what it is.
+    func installPlugin(_ archive: URL) {
+        let alert = NSAlert()
+        alert.messageText = "Install the plug-in “\(archive.deletingPathExtension().lastPathComponent)”?"
+        alert.informativeText = "A plug-in reads another service’s messages for MessageArchiver. It is installed only if RYSYS signed it and nobody changed it since; it runs with no network, and can’t change what it reads."
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let installed = try PluginStore.install(archive)
+            inform("\(installed.name) is installed", "Its instructions say how to bring its messages in. It’s read beside Messages from now on.")
+            Task { await discoverSources() }
+        } catch {
+            inform("The plug-in wasn’t installed", error.localizedDescription)
+        }
+    }
+
+    func chooseAndInstallPlugin() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "maplugin") ?? .zip]
+        panel.allowsOtherFileTypes = false
+        panel.prompt = "Install"
+        panel.message = "Choose a MessageArchiver plug-in (.maplugin), from apps.rysys.net."
+        if panel.runModal() == .OK, let url = panel.url { installPlugin(url) }
+    }
+
+    /// To the Trash; what it read stays in your archives.
+    func removePlugin(_ plugin: InstalledPlugin) {
+        do {
+            try PluginStore.remove(plugin)
+            if let id = plugin.manifest?.id { leftOut.remove(id) }
+            Task {
+                await discoverSources()
+                if phase == .dashboard { await readMessages() }
+            }
+        } catch {
+            inform("\(plugin.name) couldn’t be removed", error.localizedDescription)
+        }
+    }
+
+    func openInstructions(_ plugin: InstalledPlugin) {
+        NSWorkspace.shared.open(plugin.instructions)
+    }
+
+    /// The plug-ins' page; a click opens the browser (the app itself makes no network calls).
+    func openPluginsPage() {
+        NSWorkspace.shared.open(AppVersion.websiteURL)
+    }
+
+    /// Sources other than Messages that found something to read.
+    var otherSources: [RegisteredSource] { sources.filter { $0.id != .messages && $0.status == .ready } }
+
+    /// Engines that couldn't be used, each with its notice.
+    var failedSources: [RegisteredSource] { sources.filter(\.isFailed) }
+
+    /// Introduces one engine again (Try Again on its notice).
+    func retry(_ failed: RegisteredSource) async {
+        // A plug-in refused when installed or checked (its signature) is never run: Try Again
+        // checks the plug-ins afresh instead.
+        if plugins.contains(where: { $0.problem != nil && ($0.executable ?? $0.folder) == failed.engine.executable }) {
+            await discoverSources()
+            return
+        }
+        guard let i = sources.firstIndex(where: { $0.engine.executable == failed.engine.executable }) else { return }
+        // Its own engine, so a plug-in stays sandboxed (a fresh Engine isn't).
+        sources[i] = await SourceRegistry.introduce(sources[i].engine, chosen: exportFolders)
+        if phase == .dashboard, sources[i].status == .ready { await readMessages() }
+    }
+
+    /// Every other source that can be read, with what it reads: from the iPhone backup being
+    /// read when it found itself there (its engine then sends the backup's key), else its
+    /// first find on this Mac. Whether ticked or not.
+    var alsoRead: [(RegisteredSource, ProbeResult)] {
+        sources.filter { $0.id != .messages && $0.description != nil && !$0.isFailed }.compactMap { s in
+            if backup != nil, let found = backupFinds[s.id] {
+                var inBackup = s
+                inBackup.engine = s.engine.unlocked(with: engine?.backupKey)
+                return (inBackup, found)
+            }
+            return s.found.first(where: \.isReady).map { (s, $0) }
+        }
+    }
+
+    /// The other sources read beside Messages: those of `alsoRead` not left out.
+    var otherSourcesTaken: [(RegisteredSource, ProbeResult)] { alsoRead.filter { !leftOut.contains($0.0.id) } }
+
+    /// Asks each plug-in that reads backups whether the backup being read holds its data, with
+    /// the backup's key. Nothing is read yet; one that fails is marked failed.
+    func refreshBackupFinds() async {
+        guard let backup else {
+            backupFinds = [:]
+            return
+        }
+        var finds: [SourceID: ProbeResult] = [:]
+        for s in sources where s.id != .messages && s.description?.kinds.contains("backup") == true && !s.isFailed {
+            do {
+                if let found = try await s.engine.unlocked(with: engine?.backupKey).probe(source: backup.url).first(where: \.isReady) {
+                    finds[s.id] = found
+                }
+            } catch {
+                markFailed(s.id, error)
+            }
+        }
+        backupFinds = finds
+    }
+
+    func isTaken(_ other: RegisteredSource) -> Bool { !leftOut.contains(other.id) }
+
+    /// "Messages", "Sample": as a source names itself.
+    func sourceName(_ id: SourceID) -> String { sources.first { $0.id == id }?.name ?? (id == .messages ? "Messages" : id.rawValue) }
+
+    /// Ticks a source in or out of what is read; the dashboard is read again.
+    func setTaken(_ other: RegisteredSource, _ on: Bool) {
+        if on { leftOut.remove(other.id) } else { leftOut.insert(other.id) }
+        if phase == .dashboard { Task { await readMessages() } }
+    }
+
+    /// What the export reads beside Messages.
+    var exportSources: [ExportSource] {
+        otherSourcesTaken.map { ExportSource(engine: $0.0.engine, url: URL(fileURLWithPath: $0.1.path), description: "\($0.0.name): \($0.1.label)") }
+    }
+
+    /// A source that failed while being read: marked failed, with its notice; it is no longer
+    /// read until Try Again. Nothing else is affected.
+    func markFailed(_ id: SourceID, _ error: Error) {
+        guard let i = sources.firstIndex(where: { $0.id == id }) else { return }
+        sources[i].status = .failed(SourceRegistry.reason(error))
+    }
+
     func listBackups() {
         backups = IOSBackup.list()
     }
 
     func useMac() {
         guard backup != nil else { return }
-        Task { await switchSource(to: AppPaths.messagesDatabase, backup: nil, key: nil) }
+        Task { await switchSource(to: macDatabase, backup: nil, key: nil) }
     }
 
     /// An unencrypted backup is read at once; an encrypted one asks for its password first.
@@ -797,6 +1199,7 @@ final class AppState {
         source = url
         backup = chosen
         engine = Engine.bundled()?.unlocked(with: key)
+        await refreshBackupFinds()
         diagnostics = nil
         threads = []
         handles = []
@@ -808,7 +1211,7 @@ final class AppState {
         liveSearch = nil
         contentMatches = [:]
         updateShown()
-        fullDiskAccess = FullDiskAccess.status(of: source)
+        fullDiskAccess = FullDiskAccess.status(of: permissionTarget)
         if phase == .dashboard {
             await readMessages()
             if self.threads.isEmpty { phase = .start }

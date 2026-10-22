@@ -79,5 +79,18 @@ struct TranscriptFacts: Sendable {
     var engineVersion: String
     var crateVersion: String
     var range: String
+    /// The Platform filter's services; nil when every service was exported.
+    var platforms: [String]? = nil
+    /// The sources read beside the first (Milestone 16), for conversations that draw on them.
+    var others: [Other] = []
+    /// Sources that couldn't be read during this export: why, as the cover says it.
+    var failed: [SourceID: String] = [:]
     var conversationsInExport: Int
+
+    struct Other: Sendable {
+        var id: SourceID
+        var description: String
+        var path: String
+        var sha256: String?
+    }
 }

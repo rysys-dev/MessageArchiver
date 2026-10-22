@@ -31,30 +31,36 @@ public enum LiveIndex {
         let iso = ISO8601DateFormatter()
         iso.timeZone = .current
         let maxRowid = try await engine.diagnostics(source: source).messages.maxRowid ?? 0
-        let existing = try? ArchiveSearch(url: url, root: url.deletingLastPathComponent())
-        let lastRowid = existing?.meta("last_rowid").flatMap(Int64.init)
-        let updated = existing?.meta("updated")
+        var existing = try? ArchiveSearch(url: url, root: url.deletingLastPathComponent())
+        // An index from before Milestone 14 knows no services: built again, in full.
+        let rebuild = existing != nil && !(existing?.hasServices ?? false)
+        if rebuild { existing = nil }
+        // Messages keeps 1.0's keys; another source's are named for it.
+        let (positionKey, updatedKey) = engine.sourceID == .messages
+            ? ("last_rowid", "updated") : ("last_rowid.\(engine.sourceID)", "updated.\(engine.sourceID)")
+        let lastRowid = existing?.meta(positionKey).flatMap(Int64.init)
+        let updated = existing?.meta(updatedKey)
 
         var arguments = ["messages"] + Engine.sourceArguments(source)
-        var keep: Set<Int>?
+        var keep: Set<ThreadRef>?
         if let lastRowid, let updated {
             let changes = try await engine.changes(sinceRowid: lastRowid, editedSince: updated, source: source)
             if changes.isEmpty { return info(at: url) }
-            let threads = Set(changes.map { $0.threadId ?? Selection.noConversation })
+            let threads = Set(changes.map(\.ref))
             keep = threads
-            if !threads.contains(Selection.noConversation) {
-                arguments += ["--threads", threads.map(String.init).sorted().joined(separator: ",")]
+            if !threads.contains(where: \.isNoConversation) {
+                arguments += ["--threads", threads.map { String($0.id) }.sorted().joined(separator: ",")]
             }
         }
 
         try prepareFolder(url.deletingLastPathComponent())
-        let writer = try SearchIndexWriter(url: url, replacing: keep.map { Array($0) } ?? [])
-        let feeder = Feeder(writer: writer, keep: keep, progress: progress)
+        let writer = try SearchIndexWriter(url: url, replacing: keep.map { Array($0) } ?? [], replacingAll: rebuild)
+        let feeder = Feeder(writer: writer, source: engine.sourceID, keep: keep, progress: progress)
         try await engine.run(arguments, onEvent: { event in
             if case .progress(_, let done, let total) = event { feeder.total(done, total) }
         }) { line in try feeder.take(line) }
-        writer.setMeta("last_rowid", String(maxRowid))
-        writer.setMeta("updated", iso.string(from: started))
+        writer.setMeta(positionKey, String(maxRowid))
+        writer.setMeta(updatedKey, iso.string(from: started))
         try writer.finish()
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return info(at: url)
@@ -78,14 +84,16 @@ public enum LiveIndex {
 /// Feeds engine lines to the index on the engine's reader thread.
 private final class Feeder: @unchecked Sendable {
     let writer: SearchIndexWriter
-    let keep: Set<Int>?
+    let source: SourceID
+    let keep: Set<ThreadRef>?
     let progress: @Sendable (Int, Int) -> Void
     private var count = 0
     private var expected = 0
     private var last = Date.distantPast
 
-    init(writer: SearchIndexWriter, keep: Set<Int>?, progress: @escaping @Sendable (Int, Int) -> Void) {
+    init(writer: SearchIndexWriter, source: SourceID, keep: Set<ThreadRef>?, progress: @escaping @Sendable (Int, Int) -> Void) {
         self.writer = writer
+        self.source = source
         self.keep = keep
         self.progress = progress
     }
@@ -97,12 +105,12 @@ private final class Feeder: @unchecked Sendable {
 
     func take(_ line: Data) throws {
         let m = try Engine.decoder.decode(ExportMessage.self, from: line)
-        let thread = m.threadId ?? Selection.noConversation
+        let thread = ThreadRef(engine: m.threadId, in: source)
         if let keep, !keep.contains(thread) { return }
         let files = m.attachments.filter { $0.appPayload != true }
         var body = m.text ?? ""
         if !files.isEmpty { body += "\n" + files.map { "📎 " + ($0.filename ?? "attachment") }.joined(separator: "\n") }
-        writer.add(.init(rowid: m.rowid, guid: m.guid, threadId: thread, threadTitle: "", sender: m.senderHandle ?? (m.isFromMe ? "Me" : ""),
+        writer.add(.init(rowid: m.rowid, guid: m.guid, threadId: thread, threadTitle: "", service: m.service, sender: m.senderHandle ?? (m.isFromMe ? "Me" : ""),
                          handle: m.senderHandle, personId: nil, fromMe: m.isFromMe, date: m.date, hasAttachment: !files.isEmpty,
                          page: nil, anchor: "m-\(m.guid)", body: body))
         count += 1

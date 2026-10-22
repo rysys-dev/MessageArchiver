@@ -2,7 +2,7 @@ import Foundation
 
 /// One transcript's place in the export: its files and its Bates range (decision Q11).
 public struct TranscriptFile: Sendable, Equatable {
-    public var threadId: Int
+    public var threadId: ThreadRef
     public var title: String
     public var pdf: String
     public var html: String
@@ -99,7 +99,7 @@ final class TranscriptWriter: FormatWriter {
 
     func flush() { files.flush() }
 
-    func finish(threads: [ExportThread], stats: [Int: ThreadStats], footer: String) throws {
+    func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws {
         files.flush()
     }
 

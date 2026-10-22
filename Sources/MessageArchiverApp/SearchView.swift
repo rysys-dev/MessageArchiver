@@ -14,6 +14,8 @@ final class SearchModel {
     private(set) var search: ArchiveSearch?
     private(set) var people: [ArchiveSearch.Choice] = []
     private(set) var conversations: [ArchiveSearch.Choice] = []
+    /// The services the archive's index names (none before Milestone 14).
+    private(set) var services: [String] = []
     private(set) var results: [SearchHit] = []
     private(set) var context: [SearchHit] = []
     private(set) var error: String?
@@ -22,11 +24,12 @@ final class SearchModel {
 
     var query = "" { didSet { schedule() } }
     var personId: String? { didSet { schedule() } }
-    var threadId: Int? { didSet { schedule() } }
+    var threadId: ThreadRef? { didSet { schedule() } }
     var useDates = false { didSet { schedule() } }
     var from = Calendar.current.date(byAdding: .year, value: -1, to: .now) ?? .now { didSet { if useDates { schedule() } } }
     var to = Date.now { didSet { if useDates { schedule() } } }
     var hasAttachment = false { didSet { schedule() } }
+    var platforms = PlatformFilter() { didSet { schedule() } }
     var selection: SearchHit.ID? { didSet { loadContext() } }
     private var pending: Task<Void, Never>?
 
@@ -50,6 +53,8 @@ final class SearchModel {
             archiveName = ArchiveState.read(url)?.archiveName ?? url.lastPathComponent
             people = s.people()
             conversations = s.conversations()
+            services = s.services()
+            platforms = PlatformFilter()
             total = s.messageCount
             error = nil
             personId = nil
@@ -68,7 +73,7 @@ final class SearchModel {
             return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
         }
         return SearchFilters(personId: personId, threadId: threadId, from: useDates ? day(min(from, to)) : nil,
-                             to: useDates ? day(max(from, to)) : nil, hasAttachment: hasAttachment)
+                             to: useDates ? day(max(from, to)) : nil, hasAttachment: hasAttachment, platforms: platforms)
     }
 
     /// A moment after the last keystroke, off the main thread.
@@ -145,10 +150,26 @@ struct SearchView: View {
                 GridRow {
                     Text("Conversation").foregroundStyle(.secondary)
                     Picker("Conversation", selection: $model.threadId) {
-                        Text("All").tag(Int?.none)
-                        ForEach(model.conversations) { Text($0.name).tag(Int($0.id)) }
+                        Text("All").tag(ThreadRef?.none)
+                        ForEach(model.conversations) { Text($0.name).tag(ThreadRef($0.id)) }
                     }
                     .labelsHidden()
+                }
+                if model.services.count > 1 {
+                    GridRow {
+                        Text("Platforms").foregroundStyle(.secondary)
+                        Menu(model.platforms.isAll ? "All platforms" : PlatformFilter.label(shown: model.services.filter(model.platforms.matches).count, of: model.services.count)) {
+                            ForEach(model.services, id: \.self) { service in
+                                Toggle(service, isOn: Binding(get: { model.platforms.matches(service) }, set: { on in
+                                    if on { model.platforms.hidden.remove(service) }
+                                    else if model.services.contains(where: { $0 != service && model.platforms.matches($0) }) { model.platforms.hidden.insert(service) }
+                                }))
+                            }
+                            Divider()
+                            Button("Show All") { model.platforms = PlatformFilter() }
+                        }
+                        .fixedSize()
+                    }
                 }
                 GridRow {
                     Toggle("Dates", isOn: $model.useDates).toggleStyle(.checkbox)
@@ -181,7 +202,7 @@ struct SearchView: View {
 
     private var countText: String {
         if model.search == nil { return "Open an archive to search it." }
-        if model.results.isEmpty { return model.query.isEmpty && model.personId == nil && model.threadId == nil && !model.useDates && !model.hasAttachment ? "Type a word, or choose a filter." : "Nothing found." }
+        if model.results.isEmpty { return model.query.isEmpty && model.personId == nil && model.threadId == nil && !model.useDates && !model.hasAttachment && model.platforms.isAll ? "Type a word, or choose a filter." : "Nothing found." }
         return model.results.count >= SearchModel.limit ? "The newest \(SearchModel.limit.formatted()) results; narrow the search to see others." : "\(Plural.count(model.results.count, "message")), newest first"
     }
 

@@ -27,7 +27,32 @@ public enum EngineEvent: Sendable, Equatable {
 
 public struct EngineVersion: Codable, Sendable, Equatable {
     public var engine: String
-    public var imessageDatabase: String
+    /// Messages' engine only; a plug-in names no such library.
+    public var imessageDatabase: String?
+}
+
+/// `describe` (protocol 2, Milestone 15): who an engine is.
+public struct EngineDescription: Codable, Sendable, Equatable {
+    public var `protocol`: Int
+    public var source: SourceID
+    public var name: String
+    public var engine: String
+    /// `mac`, `backup`, `export`.
+    public var kinds: [String]
+    public var services: [String]
+}
+
+/// One line of `probe`: a source the engine found, and whether it can be read.
+public struct ProbeResult: Codable, Sendable, Equatable, Hashable {
+    public var kind: String
+    public var path: String
+    public var label: String
+    /// `ready`, `permission_denied`, `needs_password`, `not_readable`.
+    public var status: String
+    public var size: Int64?
+    public var detail: String?
+
+    public var isReady: Bool { status == "ready" }
 }
 
 /// Runs the bundled `ma-engine` and reads what it prints: data lines from stdout, events from
@@ -37,9 +62,39 @@ public struct Engine: Sendable {
     /// An encrypted backup's key (from `unlock`), sent on stdin to every command: never an
     /// argument, never stored. Nil for this Mac's Messages and unencrypted backups.
     public private(set) var backupKey: String?
+    /// The source this engine reads; every thread, handle and day it lists is stamped with it.
+    public let sourceID: SourceID
+    /// How long it may take (Milestone 15): a hung engine is stopped, never waited on forever.
+    public var limits = Limits()
+    /// A plug-in runs in a sandbox (Milestone 17): no network at all, and no writes but its
+    /// own temporary folder and the folder an export names with `--extract-to`. It reads
+    /// what it must, as any engine does, read-only.
+    public var sandboxed = false
 
-    public init(executable: URL) {
+    public struct Limits: Sendable, Equatable {
+        /// For `describe`, `probe` and `version`, which answer at once.
+        public var answer: Duration = .seconds(15)
+        /// For the rest: the longest silence (no line, no progress) before it counts as hung.
+        public var silence: Duration = .seconds(120)
+
+        public init(answer: Duration = .seconds(15), silence: Duration = .seconds(120)) {
+            self.answer = answer
+            self.silence = silence
+        }
+    }
+
+    public init(executable: URL, sourceID: SourceID = .messages) {
         self.executable = executable
+        self.sourceID = sourceID
+    }
+
+    /// This engine, stamping what it lists with `id` (from its `describe`).
+    public func reading(_ id: SourceID) -> Engine {
+        var copy = Engine(executable: executable, sourceID: id)
+        copy.backupKey = backupKey
+        copy.limits = limits
+        copy.sandboxed = sandboxed
+        return copy
     }
 
     /// This engine, sending `key` to every command.
@@ -78,6 +133,40 @@ public struct Engine: Sendable {
         return FileManager.default.isExecutableFile(atPath: helper.path) ? Engine(executable: helper) : nil
     }
 
+    static let sandboxExec = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+
+    /// The sandbox: everything allowed but the network, and writing anywhere but `writable`.
+    static func profile(writable: [String]) -> String {
+        let quote = { (path: String) in
+            "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        // The real path, as the sandbox sees it: URL's resolvingSymlinksInPath gives /var for
+        // /private/var, which the sandbox doesn't match.
+        let real = { (path: String) -> String in
+            guard let p = realpath(path, nil) else { return path }
+            defer { free(p) }
+            return String(cString: p)
+        }
+        let allowed = writable.map { "(subpath \(quote(real($0))))" }
+            + ["(literal \"/dev/null\")", "(literal \"/dev/tty\")"]
+        return "(version 1)(allow default)(deny network*)(deny file-write* (require-not (require-any \(allowed.joined(separator: " ")))))"
+    }
+
+    /// Engines beside Messages' own. Until plug-ins can be installed and checked (Milestone
+    /// 17), only a debug build takes any: `MAR_EXTRA_ENGINES=<path>[:<path>…]`.
+    public static func extras(environment: [String: String] = ProcessInfo.processInfo.environment) -> [Engine] {
+        #if DEBUG
+        guard let list = environment["MAR_EXTRA_ENGINES"], !list.isEmpty else { return [] }
+        return list.split(separator: ":").map {
+            var engine = Engine(executable: URL(fileURLWithPath: String($0)), sourceID: "")
+            engine.sandboxed = true  // as an installed plug-in would be
+            return engine
+        }
+        #else
+        return []
+        #endif
+    }
+
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
@@ -86,6 +175,19 @@ public struct Engine: Sendable {
 
     public func version() async throws -> EngineVersion {
         try await single(["version"], as: EngineVersion.self)
+    }
+
+    /// The protocol this app speaks; an engine saying another is refused (an older or newer
+    /// plug-in than this MessageArchiver).
+    public static let protocolVersion = 2
+
+    public func describe() async throws -> EngineDescription {
+        try await single(["describe"], as: EngineDescription.self)
+    }
+
+    /// What it finds on this Mac, or, with `source`, about that path alone.
+    public func probe(source: URL? = nil) async throws -> [ProbeResult] {
+        try await all(["probe"] + Self.sourceArguments(source), as: ProbeResult.self)
     }
 
     public func diagnostics(source: URL? = nil) async throws -> Diagnostics {
@@ -125,6 +227,20 @@ public struct Engine: Sendable {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        var scratch: URL?
+        if sandboxed {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ma-plugin-\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            scratch = tmp
+            var writable = [tmp.path]
+            if let i = arguments.firstIndex(of: "--extract-to"), i + 1 < arguments.count { writable.append(arguments[i + 1]) }
+            process.executableURL = Self.sandboxExec
+            process.arguments = ["-p", Self.profile(writable: writable), executable.path] + arguments
+            var environment = ProcessInfo.processInfo.environment
+            environment["TMPDIR"] = tmp.path + "/"
+            process.environment = environment
+        }
+        defer { if let scratch { try? FileManager.default.removeItem(at: scratch) } }
         let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
@@ -132,7 +248,7 @@ public struct Engine: Sendable {
         process.standardInput = input ?? FileHandle.nullDevice
 
         let exited = Exited()
-        process.terminationHandler = { exited.finish($0.terminationStatus) }
+        process.terminationHandler = { exited.finish($0.terminationStatus, signalled: $0.terminationReason == .uncaughtSignal) }
         do {
             try process.run()
         } catch {
@@ -144,10 +260,27 @@ public struct Engine: Sendable {
             try? input.fileHandleForWriting.close()
         }
         let running = Running(process)
+        // The watchdog: a command that answers at once gets `answer` in all; the others may
+        // run long, but not fall silent for more than `silence`.
+        let quick = ["describe", "probe", "version"].contains(arguments.first ?? "")
+        let heard = Heard()
+        let limit = quick ? limits.answer : limits.silence
+        let watchdog = Task.detached {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                if heard.waited(since: !quick) > limit {
+                    heard.timedOut()
+                    running.stop()
+                    return
+                }
+            }
+        }
+        defer { watchdog.cancel() }
 
         try await withTaskCancellationHandler {
             let reported = Failure<EngineError>(), lineError = Failure<Error>()
             async let errors: Void = Self.readLines(stderr.fileHandleForReading) { line in
+                heard.now()
                 switch Self.event(from: String(decoding: line, as: UTF8.self)) {
                 case .event(let event): onEvent(event)
                 case .error(let error): reported.set(error)
@@ -156,6 +289,7 @@ public struct Engine: Sendable {
                 return true
             }
             async let lines: Void = Self.readLines(stdout.fileHandleForReading) { line in
+                heard.now()
                 do {
                     try onLine(line)
                     return true
@@ -166,11 +300,18 @@ public struct Engine: Sendable {
                 }
             }
             _ = await (errors, lines)
-            let status = await exited.status
+            let (status, signalled) = await exited.status
+            if heard.didTimeOut {
+                let seconds = Int(limit.components.seconds)
+                throw EngineError(code: "timeout", message: "\(executable.lastPathComponent) didn’t answer for \(seconds) seconds, so it was stopped", exitCode: -1)
+            }
             if let error = lineError.value { throw error }
             try Task.checkCancellation()
+            if signalled {
+                throw EngineError(code: "crashed", message: "\(executable.lastPathComponent) stopped unexpectedly (signal \(status))", exitCode: -1)
+            }
             if status != 0 {
-                var error = reported.value ?? EngineError(code: "failed", message: "ma-engine stopped with exit code \(status)", exitCode: status)
+                var error = reported.value ?? EngineError(code: "failed", message: "\(executable.lastPathComponent) stopped with exit code \(status)", exitCode: status)
                 error.exitCode = status
                 throw error
             }
@@ -227,22 +368,36 @@ public struct Engine: Sendable {
     }
 }
 
-/// The process's exit status, awaited once.
+/// When the engine was last heard from, for the watchdog.
+private final class Heard: @unchecked Sendable {
+    private let lock = NSLock()
+    private let started = ContinuousClock.now
+    private var last = ContinuousClock.now
+    private var expired = false
+
+    func now() { lock.withLock { last = .now } }
+    /// Since the last line (`sinceLast`), or since the start.
+    func waited(since sinceLast: Bool) -> Duration { lock.withLock { ContinuousClock.now - (sinceLast ? last : started) } }
+    func timedOut() { lock.withLock { expired = true } }
+    var didTimeOut: Bool { lock.withLock { expired } }
+}
+
+/// The process's exit status (or the signal that ended it), awaited once.
 private final class Exited: @unchecked Sendable {
     private let lock = NSLock()
-    private var result: Int32?
-    private var waiter: CheckedContinuation<Int32, Never>?
+    private var result: (Int32, Bool)?
+    private var waiter: CheckedContinuation<(Int32, Bool), Never>?
 
-    func finish(_ status: Int32) {
+    func finish(_ status: Int32, signalled: Bool) {
         lock.lock()
-        result = status
+        result = (status, signalled)
         let w = waiter
         waiter = nil
         lock.unlock()
-        w?.resume(returning: status)
+        w?.resume(returning: (status, signalled))
     }
 
-    var status: Int32 {
+    var status: (Int32, Bool) {
         get async {
             await withCheckedContinuation { continuation in
                 lock.lock()
@@ -261,7 +416,16 @@ private final class Exited: @unchecked Sendable {
 private final class Running: @unchecked Sendable {
     private let process: Process
     init(_ process: Process) { self.process = process }
-    func stop() { if process.isRunning { process.terminate() } }
+    /// SIGTERM, then SIGKILL if it is still there two seconds later: an engine that ignores
+    /// the first is never waited on.
+    func stop() {
+        guard process.isRunning else { return }
+        process.terminate()
+        let process = self.process
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+    }
 }
 
 private final class Failure<E>: @unchecked Sendable {

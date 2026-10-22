@@ -44,12 +44,15 @@ public struct ExportPerson: Sendable, Equatable {
     public var name: String?
     public var handles: [String]
     public var inContacts: Bool
+    /// Handles the user joined by hand (Milestone 16), as the archive states them.
+    public var joinedByHand: [String]
 
-    public init(id: String, name: String?, handles: [String], inContacts: Bool) {
+    public init(id: String, name: String?, handles: [String], inContacts: Bool, joinedByHand: [String] = []) {
         self.id = id
         self.name = name
         self.handles = handles
         self.inContacts = inContacts
+        self.joinedByHand = joinedByHand
     }
 }
 
@@ -67,19 +70,37 @@ public struct ExportThread: Sendable, Equatable {
         }
     }
 
-    public var id: Int
+    public var id: ThreadRef
     public var title: String
     /// The attachment folder (or name part, in one folder): the person, or the group's name.
     public var folder: String
     public var participants: [Participant]
     public var isGroup: Bool
+    /// Its threads in every source, `id` first (Milestone 16: one person across sources).
+    public var parts: [ThreadRef]
 
-    public init(id: Int, title: String, folder: String, participants: [Participant], isGroup: Bool = false) {
+    public init(id: ThreadRef, title: String, folder: String, participants: [Participant], isGroup: Bool = false,
+                parts: [ThreadRef]? = nil) {
+        self.parts = parts ?? [id]
         self.id = id
         self.title = title
         self.folder = folder
         self.participants = participants
         self.isGroup = isGroup
+    }
+}
+
+/// A source read beside the first (Milestone 16): its engine, what `--source` it is given, and
+/// what the archive calls it.
+public struct ExportSource: Sendable {
+    public var engine: Engine
+    public var url: URL
+    public var description: String
+
+    public init(engine: Engine, url: URL, description: String) {
+        self.engine = engine
+        self.url = url
+        self.description = description
     }
 }
 
@@ -97,10 +118,17 @@ public struct ExportRequest: Sendable {
     public var names: [String: String]
     /// The people in these conversations, for `people.json` and person ids in the JSON.
     public var people: [ExportPerson]
+    /// Only these services' messages (the Platform filter); nil for all.
+    public var services: [String]?
     /// The database; nil for this Mac's Messages.
     public var source: URL?
     /// When `source` is an iPhone backup, the backup.
     public var backup: IOSBackup?
+    /// Another engine's source: what it is ("WhatsApp: WhatsApp on this Mac"), for the
+    /// transcript's cover and `archive.json`.
+    public var sourceDescription: String?
+    /// Sources read beside `source` (Milestone 16), for conversations with parts in them.
+    public var others: [ExportSource] = []
     /// For progress: messages the estimate expects.
     public var expectedMessages: Int
     /// What was chosen, kept in the archive's state for updates. Derived when not given.
@@ -178,6 +206,9 @@ public struct ExportResult: Sendable {
     /// An update: the conversations rebuilt, and files moved to the Trash.
     public var updated = false
     public var trashed = 0
+    /// Sources that couldn't be read (Milestone 16): "Sample: it stopped unexpectedly". Their
+    /// conversations are written, and marked incomplete.
+    public var failedSources: [String] = []
 }
 
 /// "1 message", "2 messages", with the number formatted for the user's locale.

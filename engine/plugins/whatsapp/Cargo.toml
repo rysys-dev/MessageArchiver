@@ -1,0 +1,21 @@
+[package]
+name = "ma-whatsapp"
+version = "1.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "MessageArchiver's WhatsApp plug-in: reads WhatsApp's chats read-only, as NDJSON (Milestones 18, 19)"
+publish = false
+
+# rusqlite and chrono at the versions ma-engine pins, so the workspace has one copy of each.
+[dependencies]
+ma-protocol = { path = "../../protocol" }
+ma-backup = { path = "../../backup" }
+crabapple = "=0.4.7"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+chrono = "=0.4.45"
+serde = "1"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+plist = "=1.10.0"

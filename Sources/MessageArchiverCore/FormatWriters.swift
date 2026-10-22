@@ -8,7 +8,7 @@ protocol FormatWriter: AnyObject {
     func write(_ m: ExportMessage, raw: [String: Any]?, thread: ExportThread, attachments: [RenderedAttachment], reply: QuotedReply?)
     func flush()
     /// Closes every file: footers, front matter, closing brackets.
-    func finish(threads: [ExportThread], stats: [Int: ThreadStats], footer: String) throws
+    func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws
 }
 
 /// Buffers each conversation's text and appends it to its file in large pieces, so hundreds of
@@ -19,10 +19,10 @@ final class ThreadFiles {
     let name: (ExportThread) -> String
     let head: (ExportThread) -> String
     let problem: (String) -> Void
-    private var pending: [Int: String] = [:]
+    private var pending: [ThreadRef: String] = [:]
     private var pendingBytes = 0
-    private var threads: [Int: ExportThread] = [:]
-    private(set) var started: [Int] = []
+    private var threads: [ThreadRef: ExportThread] = [:]
+    private(set) var started: [ThreadRef] = []
 
     init(root: URL, folder: String, name: @escaping (ExportThread) -> String,
          head: @escaping (ExportThread) -> String = { _ in "" }, problem: @escaping (String) -> Void) throws {
@@ -38,7 +38,7 @@ final class ThreadFiles {
         root.appendingPathComponent(folder).appendingPathComponent(name(thread))
     }
 
-    func hasStarted(_ id: Int) -> Bool { threads[id] != nil }
+    func hasStarted(_ id: ThreadRef) -> Bool { threads[id] != nil }
 
     func append(_ text: String, to thread: ExportThread) {
         if threads[thread.id] == nil {
@@ -55,7 +55,7 @@ final class ThreadFiles {
         }
     }
 
-    func flush(_ only: Int? = nil) {
+    func flush(_ only: ThreadRef? = nil) {
         for (id, text) in pending where only == nil || id == only {
             guard let thread = threads[id] else { continue }
             Self.append(Data(text.utf8), to: url(thread), problem: problem)
@@ -89,7 +89,7 @@ final class HTMLWriter: FormatWriter {
     let exported: String
     let placer: FilePlacer
     /// Who sent each conversation's previous message, to show a name only when it changes.
-    private var lastSender: [Int: String] = [:]
+    private var lastSender: [ThreadRef: String] = [:]
 
     /// The page body goes to a hidden part file first: its header shows the counts and dates,
     /// known only at the end.
@@ -114,17 +114,19 @@ final class HTMLWriter: FormatWriter {
         let sender = m.isFromMe ? "me" : (m.senderHandle ?? "")
         let show = m.kind == "message" && lastSender[thread.id] != sender
         if m.kind == "message" { lastSender[thread.id] = sender } else { lastSender[thread.id] = nil }
-        files.append(renderer.message(m, attachments: attachments, reply: reply, showSender: show), to: thread)
+        let mixed = Set(thread.parts.map(\.source)).count > 1
+        files.append(renderer.message(m, attachments: attachments, reply: reply, showSender: show, showService: mixed), to: thread)
     }
 
     func flush() { files.flush() }
 
-    func finish(threads: [ExportThread], stats: [Int: ThreadStats], footer: String) throws {
+    func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws {
         files.flush()
         for thread in threads where files.hasStarted(thread.id) {
             let part = files.url(thread)
             let body = (try? Data(contentsOf: part)) ?? Data()
             let header = renderer.header(title: thread.title, participants: thread.participants.map { ($0.name, $0.handle) },
+                                         sources: (thread.parts.isEmpty ? [thread.id] : thread.parts).sources,
                                          stats: stats[thread.id] ?? ThreadStats(), exported: exported)
             let head = style.pageHead(title: thread.title, stylesheet: "style.css", header: header)
             let target = files.root.appendingPathComponent("Conversations").appendingPathComponent(finalName(thread))
@@ -146,7 +148,7 @@ final class MarkdownWriter: FormatWriter {
     let people: [String: ExportPerson]
     let exportedISO: String
     let placer: FilePlacer
-    private var lastDay: [Int: String] = [:]
+    private var lastDay: [ThreadRef: String] = [:]
 
     init(root: URL, renderer: ConversationRenderer, people: [String: ExportPerson], exportedISO: String, placer: FilePlacer,
          problem: @escaping (String) -> Void) throws {
@@ -214,7 +216,7 @@ final class MarkdownWriter: FormatWriter {
         }
         if let e = m.expressive { items.append("sent with \(ConversationRenderer.expressiveNames[e] ?? e)") }
         for t in m.tapbacks {
-            let who = t.isFromMe ? "Me" : (t.from.map { renderer.names[$0] ?? $0 } ?? "Unknown")
+            let who = t.isFromMe ? renderer.me : (t.from.map { renderer.names[$0] ?? $0 } ?? "Unknown")
             var label = ConversationRenderer.tapbackNames[t.type] ?? t.type
             if t.type == "emoji", let e = t.emoji { label = "Reacted \(e)" }
             items.append(t.action == "removed" ? "\(label) by \(who) (removed)" : "\(label) by \(who)")
@@ -224,7 +226,7 @@ final class MarkdownWriter: FormatWriter {
 
     func flush() { files.flush() }
 
-    func finish(threads: [ExportThread], stats: [Int: ThreadStats], footer: String) throws {
+    func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws {
         files.flush()
         for thread in threads where files.hasStarted(thread.id) {
             let part = files.url(thread)
@@ -280,7 +282,7 @@ final class JSONWriter: FormatWriter {
     let files: ThreadFiles
     let personOfHandle: [String: String]
     let placer: FilePlacer
-    private var count: [Int: Int] = [:]
+    private var count: [ThreadRef: Int] = [:]
 
     /// Written to a hidden part file, and put in place at the end: in an update, the old file
     /// goes to the Trash only once the new one is complete.
@@ -300,7 +302,8 @@ final class JSONWriter: FormatWriter {
                                                 "handles": person?.handles ?? [p.handle]]
                                     }
                                     let threadObject: [String: Any] = [
-                                        "id": thread.id, "title": thread.title, "is_group": thread.isGroup, "participants": participants,
+                                        "id": thread.id.jsonValue, "source": thread.id.source.rawValue,
+                                        "parts": thread.parts.map(\.jsonValue), "title": thread.title, "is_group": thread.isGroup, "participants": participants,
                                     ]
                                     return "{\n  \"format\": \"MessageArchiver thread\",\n  \"version\": 1,\n  \"thread\": \(JSONWriter.encode(threadObject)),\n  \"messages\": ["
                                 }, problem: problem)
@@ -310,7 +313,8 @@ final class JSONWriter: FormatWriter {
 
     func write(_ m: ExportMessage, raw: [String: Any]?, thread: ExportThread, attachments: [RenderedAttachment], reply: QuotedReply?) {
         guard var object = raw else { return }
-        object["thread_id"] = thread.id == Selection.noConversation ? NSNull() : thread.id as Any
+        // `thread_id` and `source` are the message's own (the session sets them): one person's
+        // conversation can span sources.
         let sender: Any = m.isFromMe ? "me" : (m.senderHandle.flatMap { personOfHandle[$0] }.map { $0 as Any } ?? NSNull())
         object["sender_person_id"] = sender
         // Each file attachment gains where it is in the archive; app-message data has none.
@@ -358,7 +362,7 @@ final class JSONWriter: FormatWriter {
 
     func flush() { files.flush() }
 
-    func finish(threads: [ExportThread], stats: [Int: ThreadStats], footer: String) throws {
+    func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws {
         files.flush()
         for thread in threads where files.hasStarted(thread.id) {
             let s = stats[thread.id] ?? ThreadStats()

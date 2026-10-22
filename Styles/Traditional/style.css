@@ -221,6 +221,7 @@ a[href^="#"] {
 }
 
 span.timestamp,
+span.service,
 span.reply_context,
 span.expressive,
 span.tapbacks,
@@ -579,6 +580,31 @@ details.edit_history summary {
 .index_list .counts {
     color: var(--muted-text);
     font-size: 0.9em;
+}
+
+/* The index's search box (2026-10-22): typing narrows the list. */
+.index_filter {
+    margin-top: 10px;
+}
+
+.index_filter input {
+    width: min(24em, 100%);
+    padding: 5px 9px;
+    font: inherit;
+    font-size: 0.95em;
+    color: inherit;
+    background: transparent;
+    border: 1px solid rgba(127, 127, 127, 0.5);
+    border-radius: 6px;
+}
+
+/* The attachment notes page: each conversation's heading links to its page. */
+h2 a {
+    color: var(--link-color);
+}
+
+.note_kind {
+    margin: 0 1% 1%;
 }
 
 /* The message a search or a reply link points to: the bubble, not the name above it. */

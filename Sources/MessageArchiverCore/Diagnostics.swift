@@ -58,16 +58,17 @@ public struct Diagnostics: Codable, Sendable, Equatable {
             return date.formatted(style)
         }
 
-        var first = "\(n(messages.total)) messages · \(n(chats.threads)) conversations"
+        let count = { (v: Int, word: String) in "\(n(v)) \(word)\(v == 1 ? "" : "s")" }
+        var first = "\(count(messages.total, "message")) · \(count(chats.threads, "conversation"))"
         if let from = day(messages.firstDate), let to = day(messages.lastDate) {
             first += " · \(from) → \(to)"
         }
-        var second = "\(n(attachments.total)) attachments · \(size(attachments.bytesOnDisk)) on disk of \(size(attachments.bytesReferenced)) referenced"
+        var second = "\(count(attachments.total, "attachment")) · \(size(attachments.bytesOnDisk)) on disk of \(size(attachments.bytesReferenced)) referenced"
         if attachments.missing > 0, attachments.total > 0 {
             let percent = (Double(attachments.missing) / Double(attachments.total)).formatted(.percent.precision(.fractionLength(0)).locale(locale))
             second += " · \(n(attachments.missing)) missing (\(percent))"
         }
-        var third = "\(n(handles.total)) handles (\(n(handles.duplicated)) duplicated)"
+        var third = "\(count(handles.total, "handle")) (\(n(handles.duplicated)) duplicated)"
         if let recoverable = messages.recoverable, recoverable > 0 {
             third += " · \(n(recoverable)) recoverable"
         }

@@ -109,6 +109,11 @@ struct StartView: View {
                 .monospacedDigit()
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
+                if !state.otherSourcesTaken.isEmpty {
+                    Text("Also read: " + state.otherSourcesTaken.map(\.1.label).joined(separator: ", "))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             } else if state.isReadingSummary {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -130,7 +135,8 @@ struct StartView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(state.isReading || state.isReadingSummary || state.engine == nil || (state.fullDiskAccess == .noDatabase && state.backup == nil))
+            .disabled(state.isReading || state.isReadingSummary || state.engine == nil
+                      || (state.fullDiskAccess == .noDatabase && state.backup == nil))
             .padding(.top, 6)
             if state.engine == nil {
                 Text("The reading engine is missing from this copy of MessageArchiver. Reinstall it.")
@@ -149,6 +155,7 @@ struct StartView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
         } below: {
+            SourceNotices()
             if state.contacts != .allowed {
                 Text("Names from Contacts are off, so people show as phone numbers and email addresses. You can turn them on in Settings (⌘,).")
                     .font(.callout)

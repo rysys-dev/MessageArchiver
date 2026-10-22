@@ -1,5 +1,5 @@
 #!/bin/bash
-# Writes THIRD-PARTY-NOTICES.txt: every crate compiled into ma-engine, with its licence text as
+# Writes THIRD-PARTY-NOTICES.txt: every crate compiled into ma-engine, with its license text as
 # the crate ships it, plus SQLite and the imessage-exporter CSS the Traditional style builds on.
 # Run it after changing the engine's dependencies; install.sh copies the file into the app.
 set -euo pipefail

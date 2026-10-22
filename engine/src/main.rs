@@ -8,6 +8,7 @@ mod diagnostics;
 mod emit;
 mod handles;
 mod messages;
+mod probe;
 mod source;
 mod threads;
 
@@ -30,7 +31,7 @@ fn main() -> ExitCode {
     };
 
     let mut out = Output::stdout();
-    let result = run(&args, &mut out).and_then(|()| out.flush());
+    let result = run(&args, &mut out).and_then(|()| Ok(out.flush()?));
     match result {
         Ok(()) => ExitCode::SUCCESS,
         // The reader went away (the app cancelled): not an error worth reporting.
@@ -44,15 +45,17 @@ fn main() -> ExitCode {
 
 fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
     match &args.command {
-        Command::Version => out.line(&serde_json::json!({
+        Command::Describe => probe::describe(out),
+        Command::Probe => probe::run(&args.source, out),
+        Command::Version => Ok(out.line(&serde_json::json!({
             "engine": ENGINE_VERSION,
             "imessage_database": CRATE_VERSION,
-        })),
+        }))?),
         Command::Help => {
             print!("{}", args::USAGE);
             Ok(())
         }
-        Command::Unlock => out.line(&source::unlock_key(&args.source)?),
+        Command::Unlock => Ok(out.line(&source::unlock_key(&args.source)?)?),
         Command::Diagnostics { text } => {
             let source = source::Source::open(&args.source)?;
             let report = diagnostics::run(&source)?;
@@ -60,7 +63,7 @@ fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
                 print!("{}", diagnostics::as_text(&report));
                 Ok(())
             } else {
-                out.line(&report)
+                Ok(out.line(&report)?)
             }
         }
         Command::Threads => {
@@ -75,9 +78,9 @@ fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
             let source = source::Source::open(&args.source)?;
             activity::run(&source, out)
         }
-        Command::Changes { since_rowid, edited_since } => {
+        Command::Changes { since_rowid, edited_since, services } => {
             let source = source::Source::open(&args.source)?;
-            changes::run(&source, *since_rowid, edited_since.as_deref(), out)
+            changes::run(&source, *since_rowid, edited_since.as_deref(), services.as_deref(), out)
         }
         Command::Messages(filter) => {
             let source = source::Source::open(&args.source)?;

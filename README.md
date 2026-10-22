@@ -10,7 +10,12 @@ One export can produce:
   hashes, as HTML and PDF.
 - **Markdown and JSON:** clean text and structured data for LLMs and research.
 
-It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since, and File ▸ Search an Archive… finds any message. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved).
+It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since, and File ▸ Search an Archive… finds any message. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved). A Platform filter shows and exports only iMessage, SMS, RCS or other services' messages.
+
+Other apps' messages come from **plug-ins**, downloaded separately and installed from the app
+(File ▸ Install Plug-in…): each must be signed by RYSYS and runs with no network access. The
+first are **WhatsApp**, from WhatsApp for Mac or an iPhone backup, **Signal**, from the chat
+history Signal Desktop exports, and **Telegram**, from Telegram's data export. Someone you reach in two apps is one conversation. How plug-ins work: [`docs/plugins.md`](docs/plugins.md).
 
 ## Install (for friends)
 
@@ -64,9 +69,13 @@ MessageArchiver is free software under the **GNU General Public License v3.0** (
 
 Its engine is built on **`imessage-database`**, the library behind
 [imessage-exporter](https://github.com/ReagentX/imessage-exporter) by ReagentX
-(GPL-3.0-or-later; version 4.3.0 was checked on crates.io on 2026-10-18). MessageArchiver
-would not exist without it. Encrypted iPhone backups are read with **`crabapple`** by the same
-author (GPL-3.0-or-later). Every other library compiled into the engine, with its licence, is
+(GPL-3.0-or-later; version 4.3.0 was checked on crates.io on 2026-10-18). Encrypted iPhone backups are read with **`crabapple`** by the same
+author (GPL-3.0-or-later). Every other library compiled into the engine, with its license, is
 in [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt), which ships inside the app.
+
+**No warranty.** MessageArchiver is provided "as is", without warranty of any kind, express or
+implied. You use it at your own risk. RYSYS is not liable for any damages arising from its use,
+including the loss of data, to the extent the law allows. The full terms are sections 15 to 17 of
+the [`LICENSE`](LICENSE). Nothing here or in the app is legal advice.
 
 © 2026 RYSYS · [apps.rysys.net](https://apps.rysys.net/?app=messagearchiver&sys=macos)

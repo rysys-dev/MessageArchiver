@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var state = state
+        ScrollViewReader { scroller in
         ScrollView {
         VStack(alignment: .leading, spacing: 12) {
             Text("Permissions")
@@ -51,6 +52,8 @@ struct SettingsView: View {
             } message: {
                 Text("It’s a copy of your messages’ text that lets the dashboard search what’s said. It goes to the Trash, and is made again the next time you choose what to export.")
             }
+            Divider()
+            SourcesSection().id("sources")
             Divider()
             Text("Converters").font(.headline)
             ConvertersCard()
@@ -102,6 +105,9 @@ struct SettingsView: View {
         }
         .padding(20)
         }
+        .onAppear { showSources(scroller) }
+        .onChange(of: state.settingsShowsSources) { showSources(scroller) }
+        }
         .frame(width: 480, height: 720)
         .onAppear {
             state.reloadSkins()
@@ -110,6 +116,13 @@ struct SettingsView: View {
     }
 
     @State private var confirmDelete = false
+
+    /// Manage Sources… and Install Plug-in… open Settings here.
+    private func showSources(_ scroller: ScrollViewProxy) {
+        guard state.settingsShowsSources else { return }
+        state.settingsShowsSources = false
+        withAnimation { scroller.scrollTo("sources", anchor: .top) }
+    }
 
     private var indexText: String {
         if state.isIndexing { return "Building…" }
@@ -132,6 +145,78 @@ struct SettingsView: View {
         case .notAsked: "Not asked"
         case .denied: "Not allowed"
         case .restricted: "Restricted on this Mac"
+        }
+    }
+}
+
+/// Settings ▸ Sources (Milestone 17): Messages, built in, and each plug-in with what it found,
+/// its instructions, and Remove; Install Plug-in… and the plug-ins' page.
+private struct SourcesSection: View {
+    @Environment(AppState.self) private var state
+    @State private var removing: InstalledPlugin?
+
+    var body: some View {
+        Text("Sources").font(.headline)
+        PanelCard {
+            PanelRow(title: "Messages") { Text("Built in").foregroundStyle(.secondary) }
+            // Name above its status, the buttons beside: a status can run long.
+            ForEach(state.plugins, id: \.folder) { plugin in
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(plugin.manifest.map { "\($0.name) \($0.version)" } ?? plugin.name)
+                        StatusDot(text: status(plugin), ok: plugin.problem == nil && !isFailed(plugin))
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    if let export = state.exportKindSources.first(where: { $0.id == plugin.manifest?.id }) {
+                        Button("Choose…") { state.chooseExport(for: export) }
+                            .help("Choose the export \(export.name) saved, or the folder it saves to")
+                    }
+                    Button("Instructions") { state.openInstructions(plugin) }
+                        .disabled(!FileManager.default.fileExists(atPath: plugin.instructions.path))
+                    Button("Remove…") { removing = plugin }
+                }
+            }
+        }
+        HStack(alignment: .firstTextBaseline) {
+            Text(state.plugins.isEmpty
+                 ? "Plug-ins read other services’ messages beside Messages. They come from apps.rysys.net, signed by RYSYS."
+                 : "Plug-ins come from apps.rysys.net, signed by RYSYS; each runs with no network.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Plug-ins Page") { state.openPluginsPage() }
+            Button("Install Plug-in…") { state.chooseAndInstallPlugin() }
+        }
+        .confirmationDialog("Remove \(removing?.name ?? "the plug-in")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("Move to Trash", role: .destructive) {
+                if let removing { state.removePlugin(removing) }
+                removing = nil
+            }
+        } message: {
+            Text("Its messages are no longer read. Archives already made keep them.")
+        }
+    }
+
+    private func registered(_ plugin: InstalledPlugin) -> RegisteredSource? {
+        state.sources.first { $0.id == plugin.manifest?.id }
+    }
+
+    private func isFailed(_ plugin: InstalledPlugin) -> Bool { registered(plugin)?.isFailed ?? false }
+
+    private func status(_ plugin: InstalledPlugin) -> String {
+        if let problem = plugin.problem { return problem }
+        guard let source = registered(plugin) else { return "Checking…" }
+        switch source.status {
+        case .ready: return "Reads " + source.found.filter(\.isReady).map(\.label).joined(separator: ", ")
+        // An export chosen that can no longer be read says why.
+        case .notOnThisMac where source.description?.kinds.contains("export") == true:
+            if let why = source.found.first(where: { !$0.isReady }) { return "Can’t read the export chosen: \(why.detail ?? why.label)" }
+            return "No export chosen yet: see its instructions"
+        case .notOnThisMac: return "Nothing to read on this Mac yet: see its instructions"
+        case .failed(let why): return "Couldn’t be read: \(why)"
         }
     }
 }

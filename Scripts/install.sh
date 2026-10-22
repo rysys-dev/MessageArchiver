@@ -80,6 +80,21 @@ cat > "${STAGING}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>     <true/>
     <key>NSHumanReadableCopyright</key>    <string>© 2026 RYSYS · GPL-3.0</string>
     <key>NSContactsUsageDescription</key>  <string>MessageArchiver shows the names of the people in your conversations instead of their phone numbers and email addresses. Contacts are only read, on this Mac.</string>
+    <!-- Plug-ins (Milestone 17): a .maplugin opened in Finder installs, after asking. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key>        <string>com.rysys.messagearchiver.plugin</string>
+        <key>UTTypeDescription</key>       <string>MessageArchiver Plug-in</string>
+        <key>UTTypeConformsTo</key>        <array><string>public.zip-archive</string></array>
+        <key>UTTypeTagSpecification</key>  <dict><key>public.filename-extension</key><array><string>maplugin</string></array></dict>
+    </dict></array>
+    <key>CFBundleDocumentTypes</key>
+    <array><dict>
+        <key>CFBundleTypeName</key>        <string>MessageArchiver Plug-in</string>
+        <key>CFBundleTypeRole</key>        <string>Viewer</string>
+        <key>LSHandlerRank</key>           <string>Owner</string>
+        <key>LSItemContentTypes</key>      <array><string>com.rysys.messagearchiver.plugin</string></array>
+    </dict></array>
 </dict>
 </plist>
 PLIST

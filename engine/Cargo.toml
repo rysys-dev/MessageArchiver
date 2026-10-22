@@ -17,6 +17,16 @@ rusqlite = { version = "=0.40.2", features = ["bundled", "serialize"] }
 plist = "=1.10.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ma-protocol = { path = "protocol" }
+ma-backup = { path = "backup" }
+
+[dev-dependencies]
+tempfile = "3"
+
+# The protocol crate every engine shares, and the test engines in engine/fixtures (Milestones
+# 15, 16). `cargo build` here builds ma-engine alone; the app ships only that.
+[workspace]
+members = ["protocol", "backup", "plugins/whatsapp", "plugins/signal", "plugins/telegram"]
 
 [profile.release]
 lto = true

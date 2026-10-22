@@ -2,9 +2,10 @@ import MessageArchiverCore
 import SwiftUI
 
 /// What to read (Milestone 11): this Mac's Messages, or an iPhone backup Finder made, found in
-/// its usual folder or chosen by hand.
+/// its usual folder or chosen by hand; and what other engines found (Milestone 15).
 struct SourceMenu: View {
     @Environment(AppState.self) private var state
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Menu {
@@ -16,16 +17,73 @@ struct SourceMenu: View {
                     }
                 }
             }
+            // Read beside Messages (Milestone 16), one person's conversations combined; ticked
+            // unless left out.
+            if !state.alsoRead.isEmpty {
+                Section("Also read") {
+                    ForEach(state.alsoRead, id: \.0.id) { other, found in
+                        Toggle(isOn: Binding(get: { state.isTaken(other) }, set: { state.setTaken(other, $0) })) {
+                            Label(found.label, systemImage: found.kind == "backup" ? "iphone" : "puzzlepiece.extension")
+                        }
+                    }
+                }
+            }
+            // Installed but with nothing to read yet: its instructions say how.
+            let waiting = state.plugins.filter { p in state.sources.contains { $0.id == p.manifest?.id && $0.status == .notOnThisMac } }
+            if !waiting.isEmpty {
+                Section("Not set up yet") {
+                    ForEach(waiting, id: \.folder) { p in
+                        // A service's export (Milestone 20): nothing is read until it is chosen.
+                        if let export = state.exportKindSources.first(where: { $0.id == p.manifest?.id }) {
+                            Button("\(p.name): Choose an Export…") { state.chooseExport(for: export) }
+                        }
+                        Button("\(p.name): Instructions…") { state.openInstructions(p) }
+                    }
+                }
+            }
+            if !state.failedSources.isEmpty {
+                Section("Couldn’t be read") {
+                    ForEach(state.failedSources) { Text($0.name) }
+                }
+            }
             Divider()
             Button("Choose a Backup Folder…") { state.chooseBackupFolder() }
+            ForEach(state.exportKindSources.filter { $0.status == .ready }) { s in
+                Button("Choose Another \(s.name) Export…") { state.chooseExport(for: s) }
+            }
+            Button("Manage Sources…") {
+                state.settingsShowsSources = true
+                openSettings()
+            }
         } label: {
-            Label(state.sourceLabel, systemImage: state.backup == nil ? "desktopcomputer" : "iphone")
+            Label(state.sourceLabel + (state.otherSourcesTaken.isEmpty ? "" : " + \(state.otherSourcesTaken.count)"),
+                  systemImage: state.backup == nil ? "desktopcomputer" : "iphone")
                 .labelStyle(.titleAndIcon)
         }
         .fixedSize()
-        .help("Read this Mac’s Messages, or a backup of an iPhone made with Finder")
+        .help("Read this Mac’s Messages, or a backup of an iPhone made with Finder, and the other sources ticked")
         .disabled(state.isReading || state.isUnlocking)
         .onAppear { state.listBackups() }
+    }
+}
+
+/// A notice for each engine that couldn't be used (Milestone 15): it alone is affected, and
+/// Try Again introduces it afresh.
+struct SourceNotices: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ForEach(state.failedSources) { failed in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.flag)
+                Text(failed.notice ?? "")
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Try Again") { Task { await state.retry(failed) } }
+            }
+            .font(.callout)
+        }
     }
 }
 

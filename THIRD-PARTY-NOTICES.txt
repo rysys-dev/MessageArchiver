@@ -1,7 +1,7 @@
 MessageArchiver — third-party notices
 
 MessageArchiver is free software under the GNU General Public License v3 (see LICENSE).
-Its engine, ma-engine, is built from these Rust crates, each under the licence shown and
+Its engine, ma-engine, is built from these Rust crates, each under the license shown and
 reproduced below. The Traditional conversation style adapts the CSS of imessage-exporter
 (https://github.com/ReagentX/imessage-exporter, GPL-3.0). SQLite, compiled in through
 rusqlite, is in the public domain (https://sqlite.org/copyright.html).
@@ -6019,7 +6019,7 @@ SOFTWARE.
 crc-catalog 2.5.0 — MIT OR Apache-2.0
 https://github.com/akhilles/crc-catalog.git
 ==============================================================================
-(No licence file in the crate; licensed MIT OR Apache-2.0.)
+(No license file in the crate; licensed MIT OR Apache-2.0.)
 
 ==============================================================================
 crypto-common 0.2.2 — MIT OR Apache-2.0
@@ -9119,7 +9119,7 @@ DEALINGS IN THE SOFTWARE.
 imessage-database 4.3.0 — GPL-3.0-or-later
 https://github.com/ReagentX/imessage-exporter
 ==============================================================================
-(No licence file in the crate; licensed GPL-3.0-or-later. The GPL's text is in LICENSE.)
+(No license file in the crate; licensed GPL-3.0-or-later. The GPL's text is in LICENSE.)
 
 ==============================================================================
 indexmap 2.14.2 — Apache-2.0 OR MIT

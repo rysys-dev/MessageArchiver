@@ -21,11 +21,14 @@ public struct Person: Sendable, Hashable, Identifiable {
     public var name: String?
     /// Handles as Messages stores them, sorted.
     public var handles: [String]
-    public var handleIDs: [Int]
+    /// Each handle by source: a person can span sources (Milestone 16).
+    public var handleIDs: [HandleRef]
     /// Normalized handles: what merges and splits are saved as.
     public var keys: [String]
     /// At least one of the handles is on a Contacts card (R1's filter).
     public var inContacts = false
+    /// Its keys the user joined by hand (Milestone 16), for the archive to say so.
+    public var joinedByHand: [String] = []
 
     public var displayName: String { name ?? handles.first ?? id }
 }
@@ -106,14 +109,16 @@ public enum Identities {
     public static func resolve(handles: [HandleInfo], cards: [ContactCard], overrides: IdentityOverrides,
                                region: String? = Locale.current.region?.identifier) -> [Person] {
         let key = { (handle: String) in PhoneNumber.normalize(handle, region: region) }
-        var keyOf: [Int: String] = [:]
+        var keyOf: [HandleRef: String] = [:]
         var rawOf: [String: Set<String>] = [:]
-        var idsOf: [String: Set<Int>] = [:]
+        var idsOf: [String: Set<HandleRef>] = [:]
+        var serviceName: [String: String] = [:]
         for h in handles {
-            let k = key(h.handle)
-            keyOf[h.handleId] = k
+            let k = Self.key(h, normalized: key(h.handle))
+            if let name = h.displayName, !name.isEmpty, serviceName[k] == nil { serviceName[k] = name }
+            keyOf[h.ref] = k
             rawOf[k, default: []].insert(h.handle)
-            idsOf[k, default: []].insert(h.handleId)
+            idsOf[k, default: []].insert(h.ref)
         }
         var sets = UnionFind(Array(rawOf.keys))
         let detached = Set(overrides.detached)
@@ -131,11 +136,12 @@ public enum Identities {
             sets.join(members)
         }
 
-        var byPerson: [Int: Set<String>] = [:]
+        // Messages' own grouping holds within one source.
+        var byPerson: [SourceID: [Int: Set<String>]] = [:]
         for h in handles {
-            if let p = h.person, let k = keyOf[h.handleId], !detached.contains(k) { byPerson[p, default: []].insert(k) }
+            if let p = h.person, let k = keyOf[h.ref], !detached.contains(k) { byPerson[h.source, default: [:]][p, default: []].insert(k) }
         }
-        for members in byPerson.values { sets.join(members) }
+        for members in byPerson.values.flatMap(\.values) { sets.join(members) }
 
         for group in overrides.groups {
             sets.join(Set(group.handles).filter { rawOf[$0] != nil })
@@ -146,11 +152,30 @@ public enum Identities {
             let manual = overrides.groups.first { !Set($0.handles).isDisjoint(with: members) && $0.name != nil }?.name
             let contact = keys.lazy.compactMap { cardsOf[$0]?.first?.name }.first
             let raw: [String] = keys.flatMap { rawOf[$0, default: []].sorted() }
-            let ids: [Int] = keys.flatMap { idsOf[$0, default: []].sorted() }
-            return Person(id: keys[0], name: manual ?? contact, handles: raw, handleIDs: ids, keys: keys,
-                          inContacts: keys.contains { cardsOf[$0] != nil })
+            let ids: [HandleRef] = keys.flatMap { idsOf[$0, default: []].sorted() }
+            let byHand = keys.filter { k in overrides.groups.contains { $0.handles.count > 1 && $0.handles.contains(k) } }
+            // Contacts' name, else the one the person gave another service (WhatsApp).
+            let given = keys.lazy.compactMap { serviceName[$0] }.first
+            return Person(id: keys[0], name: manual ?? contact ?? given, handles: raw, handleIDs: ids, keys: keys,
+                          inContacts: keys.contains { cardsOf[$0] != nil }, joinedByHand: byHand)
         }
         return people.sorted(by: namedFirst)
+    }
+
+    /// What a handle is known by. A phone number (E.164) or an email is the same person in any
+    /// source; anything else another service names (a username, a user id) is that source's
+    /// own, `whatsapp:terry`, so two services' "terry" never join by themselves. Messages'
+    /// handles keep the keys they always had.
+    static func key(_ h: HandleInfo, normalized k: String) -> String {
+        if h.source == .messages || k.hasPrefix("+") || isEmail(k) { return k }
+        return "\(h.source.rawValue):\(k)"
+    }
+
+    /// An email has a dot after its @; a service's own id with an @ (WhatsApp's
+    /// `90000000003@lid`) has none.
+    static func isEmail(_ k: String) -> Bool {
+        guard let at = k.lastIndex(of: "@") else { return false }
+        return k[k.index(after: at)...].contains(".")
     }
 
     static func namedFirst(_ a: Person, _ b: Person) -> Bool {

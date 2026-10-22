@@ -1,77 +1,19 @@
-use std::{
-    fmt,
-    io::{self, BufWriter, Write},
-    time::{Duration, Instant},
-};
+use std::{fmt, io};
 
 use imessage_database::error::table::{TableConnectError, TableError};
-use serde::Serialize;
-use serde_json::json;
-
-/// NDJSON on stdout: one object per line, buffered.
-pub struct Output {
-    writer: BufWriter<Box<dyn Write>>,
-}
-
-impl Output {
-    pub fn stdout() -> Self {
-        Self::to(Box::new(io::stdout().lock()))
-    }
-
-    pub fn to(writer: Box<dyn Write>) -> Self {
-        Self { writer: BufWriter::with_capacity(256 * 1024, writer) }
-    }
-
-    pub fn line<T: Serialize>(&mut self, value: &T) -> Result<(), EngineError> {
-        serde_json::to_writer(&mut self.writer, value)
-            .map_err(|e| EngineError::io(io::Error::other(e)))?;
-        self.writer.write_all(b"\n").map_err(EngineError::io)
-    }
-
-    pub fn flush(&mut self) -> Result<(), EngineError> {
-        self.writer.flush().map_err(EngineError::io)
-    }
-}
-
-fn event(value: serde_json::Value) {
-    let mut err = io::stderr().lock();
-    let _ = serde_json::to_writer(&mut err, &value);
-    let _ = err.write_all(b"\n");
-}
+// Output and Progress are the protocol's own (engine/protocol), shared with every plug-in.
+pub use ma_protocol::{Output, Progress};
 
 pub fn error(error: &EngineError) {
-    event(json!({ "event": "error", "code": error.code, "message": error.message }));
+    ma_protocol::error(error.code, &error.message);
 }
 
 pub fn warning(code: &str, message: impl fmt::Display, rowid: Option<i32>) {
-    event(json!({ "event": "warning", "code": code, "message": message.to_string(), "rowid": rowid }));
+    ma_protocol::warning(code, message, rowid.map(i64::from));
 }
 
 pub fn done(count: u64) {
-    event(json!({ "event": "done", "count": count }));
-}
-
-/// Progress events at most every 200 ms, plus one at the start and one at the end.
-pub struct Progress {
-    stage: &'static str,
-    total: u64,
-    last: Option<Instant>,
-}
-
-impl Progress {
-    pub fn new(stage: &'static str, total: u64) -> Self {
-        let mut p = Self { stage, total, last: None };
-        p.report(0, true);
-        p
-    }
-
-    pub fn report(&mut self, done: u64, force: bool) {
-        let due = self.last.is_none_or(|t| t.elapsed() >= Duration::from_millis(200));
-        if force || due {
-            self.last = Some(Instant::now());
-            event(json!({ "event": "progress", "stage": self.stage, "done": done, "total": self.total }));
-        }
-    }
+    ma_protocol::done(count);
 }
 
 #[derive(Debug)]
@@ -102,6 +44,19 @@ impl EngineError {
             "not_found" => 4,
             _ => 1,
         }
+    }
+}
+
+/// The shared backup code's errors carry the same codes.
+impl From<ma_backup::Error> for EngineError {
+    fn from(e: ma_backup::Error) -> Self {
+        Self { code: e.code, message: e.message }
+    }
+}
+
+impl From<io::Error> for EngineError {
+    fn from(e: io::Error) -> Self {
+        Self::io(e)
     }
 }
 

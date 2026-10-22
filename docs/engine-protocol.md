@@ -12,6 +12,65 @@ ma-engine <command> [--source <chat.db or iOS backup folder>] [options]
 `--source` defaults to `~/Library/Messages/chat.db`. The database is opened read-only
 (`SQLITE_OPEN_READ_ONLY`), and a test checks that the file and its folder are left unchanged.
 
+## Protocol version 2: every engine (Milestone 15)
+
+Messages' engine and every plug-in speak the same protocol, version **2**. The shared Rust
+crate `engine/protocol` (`ma-protocol`) has its version number, the `describe` and `probe`
+types, and the output and event code. The app runs each engine as its own process, so one
+that fails never stops another.
+
+**Every engine answers:** `describe`, `probe`, `version`, `diagnostics`, `threads`, `handles`,
+`activity`, `changes` and `messages`, each as documented below for Messages. A service without
+something Messages has (chats, handles merged by Messages) reports zeros in `diagnostics`. Ids
+(`thread_id`, `handle_id`, `rowid`) are integers, unique within the engine's source and stable
+between runs; an engine whose service uses strings maps them to stable integers. Lines don't
+name their source: the app stamps everything an engine lists with the id from its `describe`.
+
+```json
+{"protocol":2,"source":"messages","name":"Messages","engine":"0.1.0","kinds":["mac","backup"],
+ "services":["iMessage","SMS","RCS","Satellite"]}
+```
+
+- **`describe`**: `source` is the id (`messages`, `whatsapp`, …); `kinds` says where it reads
+  from: `mac` (an app's database on this Mac), `backup` (an iPhone backup), `export` (a file
+  the service gives you). The app refuses an engine whose `protocol` isn't its own ("check
+  for an updated plug-in"), and a second engine claiming an id already taken.
+- **`probe [--source PATH]`**: one line per source found on this Mac, none if there is nothing
+  (that isn't an error). With `--source`, about that path alone:
+  `{"kind":"mac","path":"…/chat.db","label":"This Mac’s Messages","status":"ready","size":123,"detail":null}`.
+  `status` is `ready`, `permission_denied`, `needs_password` or `not_readable` (with `detail`).
+  Probing reads no messages and needs no password. Messages' engine probes this Mac's
+  `chat.db`, or a database or backup folder given; the app lists iPhone backups itself.
+  An `export` engine (Milestone 20) finds nothing by itself; the app probes the folder the user
+  chose for it with `--source` and reads that source only when the probe says `ready`. A
+  service's export may be read from a newer folder each time: its rowids must stay the same
+  between exports, and new messages must get higher ones.
+
+**Time limits.** `describe`, `probe` and `version` must answer within 15 seconds. The other
+commands may run as long as they need, but must not go 120 seconds without a line on stdout
+or an event on stderr (send progress during a long step). An engine past its limit is stopped
+(SIGTERM, then SIGKILL) and its source marked failed. So is one that crashes (ends on a
+signal) or whose output doesn't parse. Only that source shows the notice; the rest of the app
+carries on.
+
+**Test engines** (`engine/fixtures`, never shipped). `ma-fixture-broken` misbehaves as
+`MA_FIXTURE_MODE` says: `ok` (a tiny source, "Broken Test"), `crash`, `hang`, `garbage`,
+`protocol99`, or `fail_threads` (fine until the dashboard reads it). `ma-fixture-sample`
+(Milestone 16) reads a small JSON file (`--source`, or `MA_SAMPLE_FILE` when probing) as a
+source called Sample, so one person can be in two sources; `MA_SAMPLE_FAIL_AFTER=N` makes it
+crash after N messages. A debug build takes extra engines from
+`MAR_EXTRA_ENGINES=<path>[:<path>]`.
+
+**Backups** (Milestone 19). Reading iPhone backups is shared: `engine/backup` (`ma-backup`)
+tells whether a folder is a backup, encrypted or unfinished, unlocks it with the password or
+key from stdin, and finds a file by its domain and path. An engine that lists `backup` in
+`describe`'s kinds is asked, while a backup is Messages' source, `probe --source <backup>`
+(with the key when it is encrypted), and if it finds itself there it is read from that backup.
+
+**Several sources at once** (Milestone 16). The app reads every source taken side by side,
+each engine in its own process, and merges their `messages` by `date_utc` as they stream;
+each source's queue holds a few hundred lines, so an engine that runs ahead simply waits.
+
 ## iOS backups (Milestone 11)
 
 `--source` may be a Finder backup folder (the one named with the device's id, holding
@@ -40,14 +99,16 @@ never an argument: `{"password": "…"}` or `{"key": "<hex>"}`.
 
 | Command | stdout |
 |---|---|
-| `version` | `{"engine":"0.1.0","imessage_database":"4.3.0"}` |
+| `describe` | `{"protocol":2,"source":"messages",…}` (above) |
+| `probe [--source P]` | One line per source found (above) |
+| `version` | `{"engine":"0.1.0","imessage_database":"4.3.0"}` (`imessage_database` is Messages' alone) |
 | `unlock` | Encrypted backup: `{"encrypted":true,"key":"<hex>"}` from the password on stdin; `{"encrypted":false,"key":null}` otherwise |
 | `diagnostics` | One object of totals (below); `messages.max_rowid` is the highest message rowid, where an update starts. With `--text`, the same lines and wording as `imessage-exporter --diagnostics`, for comparison |
 | `threads` | One line per thread |
 | `handles` | One line per handle |
-| `activity` | Messages and attachments per thread per local day |
-| `messages [--start D] [--end D] [--threads ID,ID] [--since-rowid N] [--extract-to DIR]` | One line per message, oldest first |
-| `changes --since-rowid N [--edited-since ISO8601]` | One line per thread changed since an export: `{"thread_id", "new", "edited"}`. New counts every message after rowid N, tapbacks included; edited counts earlier messages whose `date_edited` (an edit or an unsend) is at or after the time |
+| `activity` | Messages and attachments per thread per local day per service |
+| `messages [--start D] [--end D] [--threads ID,ID] [--services A,B] [--since-rowid N] [--extract-to DIR]` | One line per message, oldest first. `--services` keeps only messages sent over those services, named as the `service` field names them (Milestone 14's Platform filter) |
+| `changes --since-rowid N [--edited-since ISO8601] [--services A,B]` | One line per thread changed since an export: `{"thread_id", "new", "edited"}`. New counts every message after rowid N, tapbacks included; edited counts earlier messages whose `date_edited` (an edit or an unsend) is at or after the time. With `--services`, only those services' messages count |
 
 Dates for `--start` and `--end` are `YYYY-MM-DD` in local time. `--start` is inclusive, and
 `--end` means before that day.
@@ -98,15 +159,20 @@ or linked in `chat_lookup`. One person over iMessage and over SMS is therefore o
 ```
 
 Handles with the same `person` are one person to Messages (`person_centric_id`). The app
-merges further using Contacts (Milestone 4).
+merges further using Contacts (Milestone 4). A plug-in may add `display_name`, the name the
+person gave its service (WhatsApp's push name), which the app uses when Contacts has none
+(Milestone 18). A handle that is neither a phone number nor an email (WhatsApp's
+`90000000003@lid`) is kept as that service's own.
 
 ## Activity
 
 ```json
-{"thread_id":10,"day":"2024-03-14","messages":4,"attachments":1,"attachment_bytes":18}
+{"thread_id":10,"day":"2024-03-14","service":"iMessage","messages":3,"attachments":1,"attachment_bytes":18}
+{"thread_id":10,"day":"2024-03-14","service":"SMS","messages":1,"attachments":0,"attachment_bytes":0}
 ```
 
-There is one line per thread per local day, oldest first within each thread, and
+There is one line per thread per local day per service (Milestone 14; `service` as in
+`messages`), oldest first within each thread, and
 `thread_id` is null for messages in no chat. It is plain SQL with no message bodies, so it's
 quick. The app sums these lines for any selection and date range: the live estimate, the
 timeline, and the per-conversation counts. Messages are counted as `messages --threads`

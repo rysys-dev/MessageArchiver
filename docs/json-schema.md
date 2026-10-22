@@ -25,7 +25,7 @@ the same version.
 {
   "format": "MessageArchiver thread",
   "version": 1,
-  "thread": {"id": 10, "title": "Jane Doe", "is_group": false,
+  "thread": {"id": 10, "source": "messages", "title": "Jane Doe", "is_group": false,
              "participants": [{"person_id": "+18055551234", "name": "Jane Doe",
                                "handles": ["+18055551234", "jane@example.com"]}]},
   "messages": [ { … }, { … } ],
@@ -37,7 +37,9 @@ the same version.
 
 | Field | Type | |
 |---|---|---|
-| `thread.id` | integer | *always*. The thread id (`ma-engine threads`), or `-1` for "Not in a conversation" |
+| `thread.id` | integer or string | *always*. The thread id (`ma-engine threads`), or `-1` for "Not in a conversation". An integer for Messages; for another source (Milestones 13–20), `"<source>:<id>"` |
+| `thread.source` | string | *always* (since Milestone 13). Which reader the conversation came from: `messages` for Apple's Messages |
+| `thread.parts` | [integer or string] | *always* (since Milestone 16). Its threads in every source, `thread.id` first: one person's one-to-one conversations in several sources are one conversation (groups never are) |
 | `thread.title` | string | *always*. As the archive shows it: the group's name, or the people's names |
 | `thread.is_group` | boolean | *always* |
 | `thread.participants[]` | object | *always*. One per person: `person_id` (string or null), `name` (string or null), `handles` (strings) |
@@ -54,7 +56,8 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 |---|---|---|
 | `kind` | `"message"` or `"announcement"` | *always* |
 | `rowid`, `guid` | integer, string | *always*. As in Messages' database |
-| `thread_id` | integer or null | *always*. Null for a message in no conversation |
+| `thread_id` | integer, string or null | *always*. Null for a message in no conversation; otherwise the message's own thread, one of `thread.parts` |
+| `source` | string | *always* (since Milestone 13). The source the message came from (since Milestone 16 it can differ between the messages of one conversation). Not the same as `service` (iMessage, SMS, RCS…), which says how the message was sent |
 | `chat_id` | integer or null | *always* |
 | `date`, `date_utc` | string or null | *always* |
 | `date_delivered`, `date_read` | string or null | *always* |
@@ -99,6 +102,7 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 | Field | Type | |
 |---|---|---|
 | `id` | string | *always*. Stable while the person's handles stay the same: their lowest handle in E.164 or lower-case email form |
+| `joined_by_hand` | [string] | *always* (since Milestone 16). The handles the user joined into this person by hand (as keys: E.164, lower-case email, or `<source>:<name>` for a service's own username); empty when none |
 | `name` | string or null | *always*. From your own name for them, else Contacts; null when neither has one |
 | `handles` | strings | *always*. Every handle that is this person (merged by Contacts, by Messages, and by hand; spec §8) |
 | `in_contacts` | boolean | *always*. At least one handle is on a Contacts card |
@@ -113,9 +117,11 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 | `engine` | `{version, imessage_database}` | *always*. Null values if the engine couldn't say |
 | `source` | `{path, platform, description, sha256}` | *always*. The database that was read (`platform` `macos`), or the iPhone backup folder (`ios`, with `description` naming the device, iOS version, backup date and whether it is encrypted; null for `macos`). `sha256` is the database's, or the backup's `Manifest.db`'s, when the export began (null if it couldn't be read) |
 | `range` | `{from, to}` | *always*. Inclusive local days, or null for open-ended |
+| `services` | [string] or null | *always* (since Milestone 14). The Platform filter: the only services exported (`["SMS", "RCS"]`), or null when every service was |
 | `options` | object | *always*. `formats` (`html`, `markdown`, `json`, `transcript`), `attachment_layout`, `convert_media`, `keep_originals`, `style`, `bates_prefix`, `bates_start` |
 | `counts` | object | *always*. `conversations`, `messages`, `attachments_copied`, `converted`, `missing`, `kept_original`, `not_copied` |
-| `conversations[]` | object | *always*. `id`, `title`, `is_group`, `files` (format → path; a transcript adds `transcript` for the PDF and `transcript_html`), `bates` (`{first, last, pages}` when a transcript was written, else null), `message_count`, `attachment_count`, `first_date`, `last_date` |
+| `sources[]` | object | *always* (since Milestone 16). Every source read: `id`, `path`, `description`, `sha256`, and `failed` (why it couldn't be read during this export, or null) |
+| `conversations[]` | object | *always*. `id` (as `thread.id`), `source` (as `thread.source`), `parts` (as `thread.parts`), `incomplete` (true when a source it draws on failed), `title`, `is_group`, `files` (format → path; a transcript adds `transcript` for the PDF and `transcript_html`), `bates` (`{first, last, pages}` when a transcript was written, else null), `message_count`, `attachment_count`, `first_date`, `last_date` |
 | `missing_attachments[]` | object | *always*. `conversation`, `date`, `filename`: in Messages, but not on the Mac |
 | `kept_original[]` | object | *always*. `conversation`, `date`, `filename`, `reason`: couldn't be converted, so the original is in the archive |
 | `not_copied[]` | object | *always*. `conversation`, `date`, `filename`, `reason`: on the Mac, but couldn't be copied |
@@ -149,8 +155,17 @@ app does the same and also reports files added since.
 
 Not part of the export or the manifest: MessageArchiver's bookkeeping for **Update Archive**
 (spec §11). It holds the archive's name and when it was made; the source database and device;
-what was chosen (`choice`: every conversation, or these ids; the dates; the Contacts filter);
-the export settings; `last_rowid` and `last_run_started` (where the next update starts);
+what was chosen (`choice`: every conversation, or these ids; the dates; the Contacts filter;
+`services`, the Platform filter, null for all, so an update exports the same platforms);
+the export settings; `last_rowid` and `last_run_started` (where the next update starts from
+Messages); `sources[]` (version 2, Milestone 13: each source's `id`, `path`, `device`,
+`position` and `run_started`, so each source updates from its own cursor; a source that failed
+keeps its last complete run's; a version-1 file
+without it is one Messages source, and version 2 keeps the version-1 fields for Messages so
+MessageArchiver 1.0 can still update the archive); `choice.threads` and `threads[].id` are
+numbers for Messages and `"<source>:<id>"` for other sources; `threads[].parts` (one person's
+threads in several sources, Milestone 16) and `threads[].incomplete` (a source it draws on failed;
+the next update rebuilds it);
 `next_bates`; every conversation (`threads[]`: files, counts, dates, Bates range, people,
 missing and kept-original attachments); where every attachment went (`attachments`, so an
 update links it rather than copying it again); and the run log (`runs[]`: date, `full` or

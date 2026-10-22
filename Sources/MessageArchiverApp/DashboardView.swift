@@ -44,6 +44,7 @@ private struct ChoicePane: View {
     var body: some View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: 12) {
+            SourceNotices()
             Text("Choose what to export")
                 .font(.title2.weight(.semibold))
             DateRangeRow()
@@ -81,15 +82,13 @@ private struct ChoicePane: View {
             case .people: PeopleTable()
             }
             HStack {
-                Button("Select All") { state.selectAllShown() }
-                Button("Select None") { state.selectNoneShown() }
                 if state.listMode == .people {
                     Toggle("Leave out group chats", isOn: $state.excludeGroups)
                         .toggleStyle(.checkbox)
                         .help("Ticking a person ticks only your one-to-one conversations with them")
                 }
                 Spacer()
-                Text("\(state.exportSelection.count.formatted()) of \(state.shownThreads.count.formatted()) conversations")
+                Text("\(state.exportConversations.count.formatted()) of \(state.shownConversations.count.formatted()) conversations")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -130,23 +129,49 @@ private struct DateRangeRow: View {
 
     var body: some View {
         @Bindable var state = state
-        HStack(spacing: 10) {
-            Picker("Dates", selection: $state.range.preset) {
-                Text("All").tag(DatePreset.all)
-                Text("Last 12 Months").tag(DatePreset.lastYear)
-                Text("Custom").tag(DatePreset.custom)
+        // The dates go on a line of their own: beside the presets they need more width than the
+        // list has at the window's default size.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("Dates", selection: $state.range.preset) {
+                    Text("All").tag(DatePreset.all)
+                    Text("Last 12 Months").tag(DatePreset.lastYear)
+                    Text("Custom").tag(DatePreset.custom)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                Spacer()
+                // Here, not beside the Contacts filter: that row has no room left for search.
+                PlatformMenu()
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
             if state.range.preset == .custom {
-                DatePicker("From", selection: $state.range.start, displayedComponents: .date)
-                    .fixedSize()
-                DatePicker("to", selection: $state.range.end, displayedComponents: .date)
-                    .fixedSize()
+                HStack(spacing: 10) {
+                    DatePicker("From", selection: $state.range.start, displayedComponents: .date)
+                        .fixedSize()
+                    DatePicker("to", selection: $state.range.end, displayedComponents: .date)
+                        .fixedSize()
+                    Spacer()
+                }
             }
-            Spacer()
         }
     }
+}
+
+/// Over the first column's header, which takes only text: ticks everything the list shows, or
+/// nothing. The column is fixed at the left edge, so this stays over the rows' checkboxes.
+private struct HeaderCheckbox: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        Checkbox(tick: state.visibleTick) { state.toggleVisible() }
+            .help(state.visibleTick == .on ? "Untick everything shown" : "Tick everything shown")
+            .frame(width: Self.width, height: Self.headerHeight)
+            .offset(x: Self.leading)
+    }
+
+    static let width: CGFloat = 22
+    static let headerHeight: CGFloat = 28
+    static let leading: CGFloat = 13
 }
 
 private struct Checkbox: View {
@@ -172,8 +197,29 @@ private struct Checkbox: View {
     }
 }
 
+/// A tick per service (Milestone 14): which messages are shown, counted and exported.
+struct PlatformMenu: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        Menu(state.platformsLabel) {
+            ForEach(state.presentServices, id: \.self) { service in
+                Toggle(service, isOn: Binding(get: { state.platforms.matches(service) },
+                                              set: { _ in state.toggle(service: service) }))
+            }
+            Divider()
+            Button("Show All") { state.platforms = PlatformFilter() }
+                .disabled(state.platforms.isAll)
+        }
+        .fixedSize()
+        .disabled(state.presentServices.count < 2)
+        .help("Show and export only the messages sent over the platforms ticked, even inside a conversation that mixes them")
+    }
+}
+
 private struct ConversationRow: Identifiable {
-    let id: Int
+    let conversation: Conversation
+    var id: ThreadRef { conversation.id }
     let title: String
     let detail: String
     let messages: Int
@@ -188,8 +234,8 @@ private struct ConversationTable: View {
     var body: some View {
         Table(rows, sortOrder: $sortOrder) {
             TableColumn("") { row in
-                Checkbox(tick: state.selectedThreads.contains(row.id) ? .on : .off) {
-                    if state.selectedThreads.contains(row.id) { state.selectedThreads.remove(row.id) } else { state.selectedThreads.insert(row.id) }
+                Checkbox(tick: state.isTicked(row.conversation) ? .on : .off) {
+                    state.toggle(row.conversation)
                 }
             }
             .width(22)
@@ -213,20 +259,25 @@ private struct ConversationTable: View {
             }
             .width(92)
         }
+        .overlay(alignment: .topLeading) { HeaderCheckbox() }
     }
 
     private var rows: [ConversationRow] {
         let searching = !state.search.trimmingCharacters(in: .whitespaces).isEmpty
-        return state.threads.compactMap { t in
-            guard state.shownThreads.contains(t.threadId), state.matchesSearch(t) else { return nil }
-            let handles = t.participants.compactMap(\.handle).joined(separator: ", ")
-            let title = state.title(of: t)
-            var detail = (t.isGroup ? "Group · " : "") + (handles.isEmpty ? t.chatIdentifiers.joined(separator: ", ") : handles)
-            if searching, let n = state.contentMatches[t.threadId] {
-                detail = "Said in \(Plural.count(n, "message")) · " + detail
+        return state.shownConversations.compactMap { c in
+            guard state.matchesSearch(c), let t = state.info(c.id) else { return nil }
+            let infos = c.parts.compactMap(state.info)
+            var seen = Set<String>()
+            let handles = infos.flatMap { $0.participants.compactMap(\.handle) }.filter { seen.insert($0).inserted }
+            var detail = (t.isGroup ? "Group · " : "") + (handles.isEmpty ? t.chatIdentifiers.joined(separator: ", ") : handles.joined(separator: ", "))
+            // One person over several sources (Milestone 16): which, first.
+            if c.sources.count > 1 { detail = c.sources.map { state.sourceName($0) }.joined(separator: " + ") + " · " + detail }
+            let said = c.parts.reduce(0) { $0 + (state.contentMatches[$1] ?? 0) }
+            if searching, said > 0 {
+                detail = "Said in \(Plural.count(said, "message")) · " + detail
             }
-            return ConversationRow(id: t.threadId, title: title, detail: detail, messages: state.messages(in: t),
-                                   attachments: state.attachments(in: t), last: t.lastDate ?? "")
+            return ConversationRow(conversation: c, title: state.title(of: c), detail: detail, messages: state.messages(in: c),
+                                   attachments: state.attachments(in: c), last: state.lastDate(of: c))
         }
         .sorted(using: sortOrder)
     }
@@ -277,6 +328,7 @@ private struct PeopleTable: View {
                 }
                 .width(76)
             }
+            .overlay(alignment: .topLeading) { HeaderCheckbox() }
             HStack {
                 Button("Merge…") { naming = Naming(kind: .merge, people: selected) }
                     .disabled(selected.count < 2)
@@ -314,7 +366,7 @@ private struct PeopleTable: View {
         let needle = state.search.trimmingCharacters(in: .whitespaces).lowercased()
         let filter = state.hasContactNames ? state.contactsFilter : .all
         return state.people.compactMap { p in
-            guard filter.matches(p) else { return nil }
+            guard filter.matches(p), state.platforms.isAll || state.messageCount(of: p) > 0 else { return nil }
             let detail = p.handles.joined(separator: ", ")
             if !state.matchesSearch(p) { return nil }
             return PersonRow(person: p, name: p.displayName, detail: p.name == nil ? (p.handles.count > 1 ? detail : "Not in Contacts") : detail,
@@ -370,10 +422,22 @@ private struct OverviewPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
+                // What doesn't change with the selection first (every source's totals, who has
+                // the most messages), then what does (Activity, This export), 2026-10-22.
                 if let d = state.diagnostics {
-                    Section(state.backup == nil ? "In Messages" : "In this backup") {
+                    Section("All sources") {
                         PanelCard {
-                            ForEach(d.summaryLines(), id: \.self) { Text($0).font(.callout).monospacedDigit() }
+                            // Each source named, as the others are: Messages (this Mac's or a backup's) first.
+                            // Not its handles line, Messages' own term (2026-10-22): the start
+                            // screen keeps it; "Names for … people" below is the count that matters.
+                            ForEach(Array(d.summaryLines().prefix(2).enumerated()), id: \.offset) { i, line in
+                                Text(i == 0 ? "Messages: \(line)" : line).font(.callout).monospacedDigit()
+                            }
+                            ForEach(state.otherSourcesTaken, id: \.0.id) { other, _ in
+                                if let od = state.otherDiagnostics[other.id], let first = od.summaryLines().first {
+                                    Text("\(other.name): \(first)").font(.callout).monospacedDigit()
+                                }
+                            }
                             Text(state.hasContactNames
                                  ? "Names for \(state.namedPeople.formatted()) of \(state.people.count.formatted()) people"
                                  : "Names from Contacts are off (Settings, ⌘,)")
@@ -382,18 +446,25 @@ private struct OverviewPane: View {
                         }
                     }
                 }
+                Section("Most messages") {
+                    PanelCard {
+                        // A name shows that person in People, to tick or look at.
+                        ForEach(state.topPeople) { p in
+                            Button { state.show(p) } label: {
+                                PanelRow(title: p.displayName) { Text(state.messageCount(of: p).formatted()).monospacedDigit().foregroundStyle(.secondary) }
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show \(p.displayName) in People")
+                            .onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+                        }
+                    }
+                }
                 Section("Activity") {
                     ActivityChart(months: state.months)
                         .frame(height: 110)
                         .padding(10)
                         .background(palette.card, in: .rect(cornerRadius: 10))
-                }
-                Section("Most messages") {
-                    PanelCard {
-                        ForEach(state.topPeople) { p in
-                            PanelRow(title: p.displayName) { Text(state.messageCount(of: p).formatted()).monospacedDigit().foregroundStyle(.secondary) }
-                        }
-                    }
                 }
                 Section("This export") {
                     ExportCard()

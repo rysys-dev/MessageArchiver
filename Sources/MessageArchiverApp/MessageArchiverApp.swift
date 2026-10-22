@@ -40,6 +40,9 @@ struct MessageArchiverApp: App {
                     .disabled(state.isExporting || state.fullDiskAccess != .granted)
                 Button("Verify Archive…") { state.chooseAndVerify() }
                     .disabled(state.isExporting)
+                Divider()
+                Button("Install Plug-in…") { state.chooseAndInstallPlugin() }
+                    .disabled(state.isExporting)
             }
             CommandGroup(replacing: .appInfo) {
                 Button("About MessageArchiver") { AboutPanel.show() }
@@ -66,6 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static weak var state: AppState?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// A `.maplugin` opened in Finder (or dropped on the icon): installed after asking.
+    @MainActor
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.pathExtension == "maplugin" { Self.state?.installPlugin(url) }
+    }
 
     /// Quitting mid-export asks first; Stop and Quit closes the pages written so far properly
     /// (they say the export was stopped), then quits.

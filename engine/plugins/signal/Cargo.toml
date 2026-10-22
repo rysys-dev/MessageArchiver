@@ -1,0 +1,19 @@
+[package]
+name = "ma-signal"
+version = "1.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "MessageArchiver's Signal plug-in: reads Signal Desktop's plain export read-only, as NDJSON (Milestone 20)"
+publish = false
+
+# chrono at the version ma-engine pins; sha2 and base64 at versions already in the workspace.
+[dependencies]
+ma-protocol = { path = "../../protocol" }
+chrono = "=0.4.45"
+sha2 = "=0.11.1"
+base64 = "=0.22.1"
+serde = "1"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
