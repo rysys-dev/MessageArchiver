@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="MessageArchiver">
+<title>{{title}} · Message Explorer</title>
+<link rel="stylesheet" href="Explorer/style.css">
+<link rel="stylesheet" href="Explorer/explorer.css">
+</head>
+<body class="explorer">
+<div class="ex_app">
+<aside class="ex_side">
+<header class="ex_side_head">
+<h1 id="ex-name">Message Explorer</h1>
+<p class="ex_sub" id="ex-sub"></p>
+<div class="ex_tabs" role="tablist">
+<button type="button" role="tab" id="ex-tab-conversations" aria-selected="true">Conversations</button>
+<button type="button" role="tab" id="ex-tab-people" aria-selected="false">People</button>
+</div>
+<input type="search" id="ex-filter" placeholder="Find" aria-label="Find a conversation or person" autocomplete="off">
+</header>
+<ul class="ex_list" id="ex-list"></ul>
+<footer class="ex_side_foot"><a href="index.html">Archive index</a></footer>
+</aside>
+<main class="ex_main" id="ex-main">
+<noscript><div class="ex_notice">The Message Explorer needs JavaScript, which this browser has turned off. The <a href="index.html">archive index</a> works without it.</div></noscript>
+</main>
+</div>
+<script src="Explorer/explorer.js"></script>
+<script src="Explorer/list.js"></script>
+</body>
+</html>

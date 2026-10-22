@@ -77,6 +77,9 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         /// A source it draws on couldn't be read in the run that wrote it; the next update
         /// rebuilds it.
         public var incomplete: Bool? = nil
+        /// How many parts its Message Explorer data has (Milestone 22); nil when it was written
+        /// before the Explorer existed.
+        public var explorer: Int? = nil
     }
 
     /// Where an attachment went, so an update links to it instead of copying it again.

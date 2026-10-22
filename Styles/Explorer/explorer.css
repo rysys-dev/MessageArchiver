@@ -1,0 +1,463 @@
+/*
+ * MessageArchiver — the Message Explorer's layout (Milestone 22). The bubbles keep the
+ * conversation style (style.css beside this file); this file lays out the app around them.
+ */
+:root {
+    --ex-side: #f3f3f5;
+    --ex-main: #ffffff;
+    --ex-line: rgba(0, 0, 0, 0.1);
+    --ex-text: #1d1d1f;
+    --ex-muted: #6e6e73;
+    --ex-select: #0a64d6;
+    --ex-hover: rgba(0, 0, 0, 0.05);
+    --ex-field: rgba(0, 0, 0, 0.06);
+    --ex-warn: #b42318;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ex-side: #1d1d1f;
+        --ex-main: #111112;
+        --ex-line: rgba(255, 255, 255, 0.1);
+        --ex-text: #f2f2f4;
+        --ex-muted: #9b9ba1;
+        --ex-select: #2a73d6;
+        --ex-hover: rgba(255, 255, 255, 0.06);
+        --ex-field: rgba(255, 255, 255, 0.08);
+        --ex-warn: #ff8a80;
+    }
+}
+
+html,
+body.explorer {
+    height: 100%;
+    margin: 0;
+}
+
+body.explorer {
+    background: var(--ex-main);
+    color: var(--ex-text);
+    overflow: hidden;
+}
+
+.ex_app {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) 1fr;
+    height: 100vh;
+    height: 100dvh;
+}
+
+/* The side bar: the archive's name, the tabs, the filter, the list. */
+
+.ex_side {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--ex-side);
+    border-right: 1px solid var(--ex-line);
+}
+
+.ex_side_head {
+    padding: 16px 14px 10px;
+}
+
+.ex_side_head h1,
+.ex_welcome h2.ex_brand {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.ex_side_head h1 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ex_sub {
+    font-size: 12px;
+    color: var(--ex-muted);
+}
+
+.ex_tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    padding: 2px;
+    margin: 12px 0 10px;
+    background: var(--ex-field);
+    border-radius: 8px;
+}
+
+.ex_tabs button {
+    font: inherit;
+    font-size: 13px;
+    padding: 5px 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.ex_tabs button[aria-selected="true"] {
+    background: var(--ex-main);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    font-weight: 600;
+}
+
+#ex-filter {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--ex-field);
+    color: inherit;
+}
+
+.ex_list {
+    list-style: none;
+    margin: 0;
+    padding: 0 8px 8px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+a.ex_row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px;
+    border-radius: 10px;
+    color: inherit;
+    text-decoration: none;
+    outline-offset: -2px;
+}
+
+a.ex_row:hover {
+    background: var(--ex-hover);
+}
+
+a.ex_row.selected {
+    background: var(--ex-select);
+    color: white;
+}
+
+a.ex_row.selected .ex_row_sub,
+a.ex_row.selected .ex_row_date {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.ex_avatar {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.ex_row_text {
+    display: block;
+    min-width: 0;
+    flex: 1;
+}
+
+.ex_row_top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.ex_row_title,
+.ex_row_sub {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ex_row_title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.ex_row_date {
+    flex: none;
+    font-size: 12px;
+    color: var(--ex-muted);
+}
+
+.ex_row_sub {
+    font-size: 12px;
+    color: var(--ex-muted);
+}
+
+.ex_none {
+    padding: 16px 8px;
+    font-size: 13px;
+    color: var(--ex-muted);
+}
+
+.ex_side_foot {
+    padding: 10px 14px;
+    border-top: 1px solid var(--ex-line);
+    font-size: 12px;
+}
+
+.ex_side_foot a,
+.ex_main a.ex_link,
+.ex_main a.ex_back {
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+.ex_side_foot a:hover,
+.ex_main a.ex_link:hover {
+    text-decoration: underline;
+}
+
+/* The main pane: a conversation, a person, or the archive's welcome. */
+
+.ex_main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.ex_head {
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--ex-line);
+}
+
+.ex_head_title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.ex_head h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.ex_head p {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--ex-muted);
+}
+
+.ex_links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 6px;
+    font-size: 12.5px;
+}
+
+.ex_messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px 24px;
+    outline: none;
+}
+
+.ex_messages .message {
+    margin: 2px 4px;
+}
+
+.ex_messages .message .sent,
+.ex_messages .message .received {
+    max-width: min(70%, 560px);
+    padding: 9px 14px;
+    border-radius: 18px;
+}
+
+.ex_messages .attachment img,
+.ex_messages .attachment video {
+    max-height: 420px;
+    border-radius: 12px;
+}
+
+.ex_messages .sender_label {
+    margin-top: 10px;
+}
+
+/* The day has its own line, so the time in each bubble can be quiet; the rule under it too. */
+.ex_messages span.timestamp {
+    font-size: 11.5px;
+}
+
+.ex_messages .message hr {
+    border: 0;
+    height: 0;
+    margin: 3px 0;
+}
+
+.ex_day {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    text-align: center;
+    margin: 14px 0 6px;
+}
+
+.ex_day span {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ex-muted);
+    background: var(--ex-side);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    padding: 2px 10px;
+    border-radius: 10px;
+}
+
+.ex_more {
+    display: block;
+    margin: 10px auto 4px;
+    font: inherit;
+    font-size: 13px;
+    padding: 5px 14px;
+    border: 1px solid var(--ex-line);
+    border-radius: 14px;
+    background: transparent;
+    color: var(--link-color);
+    cursor: pointer;
+}
+
+.ex_more:hover {
+    background: var(--ex-hover);
+}
+
+.ex_start {
+    text-align: center;
+    margin: 14px 0 4px;
+    font-size: 12px;
+    color: var(--ex-muted);
+}
+
+.message.ex_flash > .sent,
+.message.ex_flash > .received {
+    outline: 3px solid #F5BD61;
+}
+
+.ex_notice {
+    margin: 20px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--ex-field);
+    font-size: 14px;
+}
+
+.ex_welcome {
+    margin: auto;
+    max-width: 460px;
+    padding: 24px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--ex-muted);
+}
+
+.ex_welcome h2 {
+    margin: 0 0 10px;
+    font-size: 20px;
+    color: var(--ex-text);
+}
+
+.ex_welcome p {
+    margin: 4px 0;
+}
+
+.ex_welcome .ex_range {
+    font-weight: 600;
+    color: var(--ex-text);
+}
+
+.ex_welcome .ex_hint {
+    margin-top: 22px;
+    color: var(--ex-text);
+}
+
+.ex_welcome .ex_fine {
+    margin-top: 22px;
+    font-size: 12px;
+}
+
+.ex_warn {
+    color: var(--ex-warn);
+}
+
+.ex_person {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 20px 24px;
+}
+
+.ex_person h3 {
+    margin: 20px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ex-muted);
+}
+
+.ex_handles {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 14px;
+}
+
+.ex_handles li {
+    padding: 3px 0;
+}
+
+.ex_list.ex_inline {
+    max-width: 520px;
+    padding: 0;
+    overflow: visible;
+}
+
+.ex_back {
+    display: none;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* A phone's width: the list, or what it opens, one at a time. */
+@media (max-width: 700px) {
+    .ex_app {
+        grid-template-columns: 1fr;
+    }
+
+    body.ex_open .ex_side {
+        display: none;
+    }
+
+    body:not(.ex_open) .ex_main {
+        display: none;
+    }
+
+    .ex_main a.ex_back {
+        display: inline-block;
+    }
+
+    .ex_messages .message .sent,
+    .ex_messages .message .received {
+        max-width: 85%;
+    }
+}

@@ -56,7 +56,7 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.0.0-manual.pdf">full manual (PDF, 39 pages, 6.4 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.2.0-manual.pdf">full manual (PDF, 45 pages, 7.0 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
 
 <nav aria-label="Contents">
   <ol>
@@ -66,6 +66,7 @@ th { color: var(--muted); font-weight: 600; }
     <li><a href="#people">People and names</a></li>
     <li><a href="#export">Export</a></li>
     <li><a href="#archive">What's in an archive</a></li>
+    <li><a href="#explorer">Message Explorer</a></li>
     <li><a href="#update">Update an archive</a></li>
     <li><a href="#verify">Verify an archive</a></li>
     <li><a href="#search">Search an archive</a></li>
@@ -133,13 +134,14 @@ th { color: var(--muted); font-weight: 600; }
   <li><strong>Convert photos, audio and video so any browser plays them:</strong> HEIC photos become JPEG, voice notes M4A, and MOV videos MP4. Videos need the free <code>ffmpeg</code> tool; without it they're copied as they are (Safari still plays them).</li>
   <li><strong>Keep the originals beside converted copies:</strong> recommended for a legal record.</li>
 </ul>
-<p>The export runs with a progress bar; you can keep using your Mac. <strong>Stop</strong> leaves complete pages for what was done. When it finishes, open the archive, show it in Finder, verify it or search it.</p>
+<p>The export runs with a progress bar; you can keep using your Mac. <strong>Stop</strong> leaves complete pages for what was done. When it finishes, <strong>Message Explorer</strong> (or <kbd>Return</kbd>) opens the archive as a messaging app, and <strong>Open Archive</strong> opens its index; below the totals you can also search it, verify it or show it in Finder.</p>
 
 <h2 id="archive">What's in an archive</h2>
 <p>Each export is a new folder; nothing already on the disk is replaced.</p>
 <div class="table-wrap"><table>
   <tr><th>Item</th><th>What it holds</th></tr>
   <tr><td><code>index.html</code></td><td>Start here: what was read, and every conversation with its counts, its sources (Messages, Signal…), its dates and links to each format. Type in its box to find a conversation.</td></tr>
+  <tr><td><code>explorer.html</code></td><td>The <a href="#explorer">Message Explorer</a>: people and conversations, as in a messaging app. Its files are in <code>Explorer/</code>.</td></tr>
   <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the index. Only when there are some.</td></tr>
   <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
   <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
@@ -149,6 +151,15 @@ th { color: var(--muted); font-weight: 600; }
 </table></div>
 <p>If another app's messages couldn't be read during an export (see <a href="#plugins">Other apps</a>), the rest is exported, and the conversations that draw on that app are marked <strong>incomplete</strong> in the index, on their transcripts and in <code>archive.json</code>. Updating the archive later fills them in.</p>
 <p><strong>Missing attachments</strong> are ones the messages name but whose file wasn't where they were read from (for Messages, on the Mac); they're listed in <code>attachment-notes.html</code>, and each conversation's count in the index links there. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
+
+<h2 id="explorer">Message Explorer</h2>
+<p>Every archive has a Message Explorer, <code>explorer.html</code>: the archive browsed like a messaging app, in any browser, offline. Open it with <strong>Message Explorer</strong> when an export finishes, from the link at the top of the archive's index, or by double-clicking it in the archive folder.</p>
+<ul>
+  <li><strong>Conversations</strong> lists every conversation, the most recent first. Click one to read it on the right: it opens on its latest messages, with a line for each day; <strong>Show earlier messages</strong> goes further back. Links above it open its page, transcript, Markdown or JSON.</li>
+  <li><strong>People</strong> lists everyone in the archive with their phone numbers and emails. Click a person to see all of them and every conversation they're in, groups included.</li>
+  <li>Type in the box to find a name, a number or an email; the up and down arrow keys move through the list.</li>
+</ul>
+<p>It shows what the archive holds: export everything to see everything. An archive made by an earlier version gains a Message Explorer when it's updated; a conversation that wasn't rebuilt then links to its page instead. To find words said, use <a href="#search">Search an archive</a>.</p>
 
 <h2 id="update">Update an archive</h2>
 <p><span class="menu">File › Update Archive…</span> (<kbd>⇧⌘U</kbd>), or <strong>Update an existing archive…</strong> on the dashboard, adds what's new since the archive was made, with the same choices. Only conversations with new or edited messages are rebuilt. The files it replaces go to the Trash (or, on a drive without one, to a <code>RYSYS Trash</code> folder on that drive).</p>
@@ -170,7 +181,7 @@ th { color: var(--muted); font-weight: 600; }
 <p>With a backup chosen, plug-ins that can read backups (WhatsApp) read that backup too, since the phone keeps the whole history; the menu's <strong>Also read</strong> says so, for example "WhatsApp in “Alex’s iPhone” backup".</p>
 
 <h2 id="plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</h2>
-<p>Messages is built in. Other apps' messages are read by <strong>plug-ins</strong>, which you download from <a href="https://apps.rysys.net/?app=messagearchiver&amp;sys=macos">MessageArchiver's page</a> only if you use that app.</p>
+<p>Messages is built in. Other apps' messages are read by <strong>plug-ins</strong>, which you download from <strong>Plug-ins</strong> under the Download button on <a href="https://apps.rysys.net/?app=messagearchiver&amp;sys=macos">MessageArchiver's page</a>, only for the apps you use. They need MessageArchiver 1.1.0 or later.</p>
 <ol>
   <li>Download the plug-in (a <code>.maplugin</code> file) and double-click it, or choose <span class="menu">File › Install Plug-in…</span>.</li>
   <li>MessageArchiver asks first, then installs it, if RYSYS signed it and nothing in it was changed since. Anything else is refused, with the reason.</li>

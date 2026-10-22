@@ -3,7 +3,7 @@ import Foundation
 // The single source of the version: the app footer, the About panel, the transcript cover
 // page and the bundle's Info.plist (via Scripts/install.sh) all read it from here.
 public enum AppVersion {
-    public static let string = "1.1.0"
+    public static let string = "1.2.0"
 
     /// The app, its platform and its version, so apps.rysys.net can show this build's page:
     /// its guide and download (conventions §1).

@@ -9,6 +9,8 @@ One export can produce:
 - **Transcripts:** a formal record with Bates numbering, pagination and SHA-256 integrity
   hashes, as HTML and PDF.
 - **Markdown and JSON:** clean text and structured data for LLMs and research.
+- **Message Explorer:** in every archive, `explorer.html` browses it like a messaging app,
+  people and conversations side by side, offline in any browser.
 
 It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since, and File ▸ Search an Archive… finds any message. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved). A Platform filter shows and exports only iMessage, SMS, RCS or other services' messages.
 

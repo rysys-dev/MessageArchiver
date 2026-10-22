@@ -67,7 +67,7 @@ struct ExportSheet: View {
             }
             .toggleStyle(.checkbox)
 
-            Text("Messages is only read. The archive is a new folder; nothing already on the disk is replaced.")
+            Text("Your messages are only read, never changed. The export goes into a new folder, so nothing already on your Mac is replaced.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -183,7 +183,7 @@ struct ExportingView: View {
                 .controlSize(.large)
                 .keyboardShortcut(.cancelAction)
                 .help("Stop now. What’s written so far is kept, and marked as incomplete.")
-            Text("Messages is only read. You can keep using your Mac.")
+            Text("Your messages are only read, never changed. You can keep using your Mac while it runs.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -219,29 +219,20 @@ struct DoneView: View {
     var body: some View {
         StartLayout {
             if let r = state.exportResult {
+                // The finished screen (Milestone 22): one line for what was written, one for what
+                // needs a look; the lesser actions small; the three that matter as a dialog's
+                // buttons, going back on the left and the two ways in on the right.
                 CardHeading(symbol: r.stopped ? "exclamationmark.triangle" : "checkmark.circle",
                             title: r.stopped ? (r.updated ? "Update stopped" : "Export stopped") : (r.updated ? "Archive updated" : "Export finished"),
-                            detail: r.root.path)
+                            detail: r.root.lastPathComponent)
+                    .help(r.root.path)
                 VStack(spacing: 4) {
-                    if r.updated {
-                        Text(r.conversations == 0 ? "Nothing new: every conversation was already up to date."
-                             : "\(Plural.count(r.conversations, "conversation")) rebuilt · \(Plural.count(r.messages, "message")) written")
-                        if r.trashed > 0 {
-                            Text("\(Plural.count(r.trashed, "earlier file")) moved to the Trash")
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text("\(Plural.count(r.conversations, "conversation")) · \(Plural.count(r.messages, "message"))")
-                    }
-                    Text("\(Plural.count(r.attachmentsCopied, "attachment")) copied · \(r.converted.formatted()) converted")
-                    if r.manifestFiles > 0 {
-                        Text("\(Plural.count(r.manifestFiles, "file")) hashed in manifest.json and SHA256SUMS.txt")
+                    Text(Self.summary(r))
+                    if r.updated && r.trashed > 0 {
+                        Text("\(Plural.count(r.trashed, "earlier file")) moved to the Trash")
                             .foregroundStyle(.secondary)
                     }
-                    if !r.missing.isEmpty {
-                        Text("\(Plural.count(r.missing.count, "attachment")) missing (not on disk), listed in the archive’s index")
-                            .foregroundStyle(palette.flag)
-                    }
+                    if let notes = notes(r) { notes }
                     if r.stopped {
                         Text("The pages written so far are complete files and say the export was stopped.")
                             .foregroundStyle(palette.flag)
@@ -254,17 +245,7 @@ struct DoneView: View {
                 }
                 .monospacedDigit()
                 .multilineTextAlignment(.center)
-                if !r.keptOriginal.isEmpty {
-                    Text("\(Plural.count(r.keptOriginal.count, "attachment")) kept in their original format (couldn’t be converted); listed in the archive’s index. Nothing is missing.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                if !r.notCopied.isEmpty {
-                    Text("\(Plural.count(r.notCopied.count, "attachment")) couldn’t be copied; listed in the archive’s index.")
-                        .foregroundStyle(palette.flag)
-                }
-                let details = r.notCopied.map { "Not copied: \($0.conversation): \($0.filename) — \($0.reason)" }
-                    + r.keptOriginal.map { "Original kept: \($0.conversation): \($0.filename) — \($0.reason)" } + r.problems
+                let details = Self.details(r)
                 if !details.isEmpty {
                     DisclosureGroup("Details") {
                         ScrollView {
@@ -277,28 +258,85 @@ struct DoneView: View {
                     }
                     .frame(maxWidth: 460)
                 }
-                HStack(spacing: 12) {
-                    Button("Search") {
+                HStack(spacing: 22) {
+                    Button {
                         search.open(r.root)
                         openWindow(id: "search")
+                    } label: {
+                        Label("Search", systemImage: "magnifyingglass")
                     }
                     .help("Search what the messages in this archive say")
-                    Button("Verify Archive") { state.verify(r.root) }
-                        .help("Hash every file again and compare with manifest.json")
-                    Button("Show in Finder") { state.showArchive() }
+                    Button { state.verify(r.root) } label: {
+                        Label("Verify Archive", systemImage: "checkmark.shield")
+                    }
+                    .help("Hash every file again and compare with manifest.json")
+                    Button { state.showArchive() } label: {
+                        Label("Show in Finder", systemImage: "folder")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .padding(.top, 6)
+                HStack(spacing: 12) {
+                    Button("Back to Conversations") { state.backToDashboard() }
+                    Spacer(minLength: 24)
                     Button("Open Archive") { state.openArchive() }
+                        .help("The archive’s index: every conversation, and its pages and files")
+                    Button("Message Explorer") { state.openExplorer() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
+                        .help("People and conversations, as in a messaging app")
                 }
                 .controlSize(.large)
-                .padding(.top, 6)
+                .frame(maxWidth: 560)
+                .padding(.top, 4)
             } else {
                 CardHeading(symbol: "xmark.octagon", title: "The export couldn’t start",
                             detail: state.exportError ?? "Something went wrong.")
+                Button("Back to Conversations") { state.backToDashboard() }
+                    .buttonStyle(.link)
             }
-            Button("Back to Conversations") { state.backToDashboard() }
-                .buttonStyle(.link)
         }
+    }
+
+    /// "206 conversations · 12,336 messages · 893 attachments (131 converted)".
+    static func summary(_ r: ExportResult) -> String {
+        var attachments = Plural.count(r.attachmentsCopied, "attachment")
+        if r.converted > 0 { attachments += " (\(r.converted.formatted()) converted)" }
+        if r.updated {
+            if r.conversations == 0 { return "Nothing new: every conversation was already up to date." }
+            return "\(Plural.count(r.conversations, "conversation")) rebuilt · \(Plural.count(r.messages, "message")) written · \(attachments)"
+        }
+        return "\(Plural.count(r.conversations, "conversation")) · \(Plural.count(r.messages, "message")) · \(attachments)"
+    }
+
+    /// The attachments that need a look, on one line: missing and not copied in the flag
+    /// colour, kept in their original format (nothing lost) in gray.
+    func notes(_ r: ExportResult) -> Text? {
+        var parts: [Text] = []
+        if !r.missing.isEmpty {
+            parts.append(Text("\(Plural.count(r.missing.count, "attachment")) missing (not on disk)").foregroundStyle(palette.flag))
+        }
+        if !r.notCopied.isEmpty {
+            parts.append(Text("\(r.notCopied.count.formatted()) couldn’t be copied").foregroundStyle(palette.flag))
+        }
+        if !r.keptOriginal.isEmpty {
+            parts.append(Text("\(r.keptOriginal.count.formatted()) kept in their original format").foregroundStyle(.secondary))
+        }
+        guard let first = parts.first else { return nil }
+        return parts.dropFirst().reduce(first) { Text("\($0) · \($1)") }
+    }
+
+    static func details(_ r: ExportResult) -> [String] {
+        var out: [String] = []
+        if r.manifestFiles > 0 { out.append("\(Plural.count(r.manifestFiles, "file")) hashed in manifest.json and SHA256SUMS.txt.") }
+        if !r.missing.isEmpty || !r.notCopied.isEmpty || !r.keptOriginal.isEmpty {
+            out.append("Each attachment below, and each missing one, is listed in the archive’s attachment notes (linked from its index).")
+        }
+        if !r.keptOriginal.isEmpty {
+            out.append("Kept in their original format: they couldn’t be converted for every browser, so the original file is in the archive and the page shows it. Nothing is lost.")
+        }
+        return out + r.notCopied.map { "Not copied: \($0.conversation): \($0.filename) — \($0.reason)" }
+            + r.keptOriginal.map { "Original kept: \($0.conversation): \($0.filename) — \($0.reason)" } + r.problems
     }
 }
 

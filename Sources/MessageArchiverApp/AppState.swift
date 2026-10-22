@@ -786,6 +786,13 @@ final class AppState {
         NSWorkspace.shared.open(root.appendingPathComponent("index.html"))
     }
 
+    /// The archive's Message Explorer (Milestone 22); an archive without one opens its index.
+    func openExplorer() {
+        guard let root = exportResult?.root else { return }
+        let explorer = root.appendingPathComponent(Explorer.page)
+        NSWorkspace.shared.open(FileManager.default.fileExists(atPath: explorer.path) ? explorer : root.appendingPathComponent("index.html"))
+    }
+
     func backToDashboard() { phase = .dashboard }
 
     // MARK: Verify Archive (spec §10)

@@ -264,6 +264,10 @@ private final class Session: @unchecked Sendable {
     private var extractUses: [String: Int] = [:]
     let lock = NSLock()
     var writers: [FormatWriter] = []
+    /// The Message Explorer's data (Milestone 22): written for every archive, whatever the formats.
+    var explorer: ExplorerWriter!
+    /// How many Explorer parts each conversation written in this run has.
+    var explorerParts: [ThreadRef: Int] = [:]
 
     var allocator = NameAllocator()
     /// Attachment key → where it is in the archive: from earlier runs, and this one.
@@ -343,6 +347,7 @@ private final class Session: @unchecked Sendable {
                 writers.append(try TranscriptWriter(root: root, renderer: renderer, options: request.options.transcript, placer: placer, problem: problem))
             }
         }
+        explorer = try ExplorerWriter(root: root, style: style, kit: try Explorer.Kit.load(), renderer: renderer, placer: placer, problem: problem)
     }
 
     // MARK: Messages
@@ -364,6 +369,7 @@ private final class Session: @unchecked Sendable {
         for writer in writers {
             writer.write(m, raw: raw, thread: thread, attachments: attachments, reply: reply)
         }
+        explorer.write(m, thread: thread, attachments: attachments, reply: reply)
 
         let page = writers.first { $0.format == .html } ?? writers.first { $0.format == .markdown }
         var body = m.kind == "announcement" ? renderer.announcementText(m) : (m.text ?? "")
@@ -573,6 +579,7 @@ private final class Session: @unchecked Sendable {
         let sourceHash = hashes[readers[0].id] ?? nil
         lock.withLock { result.failedSources = failed.sorted { $0.key < $1.key }.map { "\(describe($0.key)): \($0.value)" } }
         writers.forEach { $0.flush() }
+        explorer.flush()
         lock.withLock { progress.finishing = true }
         maybeReport(force: true)
         if stopped { queue.cancelAllOperations() }
@@ -594,6 +601,8 @@ private final class Session: @unchecked Sendable {
         for writer in writers {
             try writer.finish(threads: written, stats: stats, footer: footer)
         }
+        let priorParts = Dictionary((prior?.threads ?? []).compactMap { t in t.explorer.map { (t.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        explorerParts = try explorer.finish(threads: written, prior: priorParts)
         lock.withLock {
             result.conversations = started.count
             result.messages = progress.messages
@@ -615,6 +624,7 @@ private final class Session: @unchecked Sendable {
             try writePeopleJSON(records)
         }
         try writeIndex(records, stopped: stopped, footer: footer)
+        try writeExplorer(records, stopped: stopped, footer: footer)
         try search.finish()
 
         // Last, so it covers every file: the manifest (spec §10).
@@ -654,7 +664,8 @@ private final class Session: @unchecked Sendable {
                 bates: transcript.map { .init(first: $0.firstBates, last: $0.lastBates, pages: $0.pages) } ?? byId[t.id]?.bates,
                 personIds: Array(Set(t.participants.compactMap(\.personId))).sorted(),
                 missing: missingIn[t.id] ?? [], keptOriginal: kept, notCopied: notCopied,
-                parts: t.parts.count > 1 ? t.parts : nil, incomplete: isIncomplete(t) ? true : nil)
+                parts: t.parts.count > 1 ? t.parts : nil, incomplete: isIncomplete(t) ? true : nil,
+                explorer: explorerParts[t.id] ?? byId[t.id]?.explorer)
         }
         // By title; two of one name (two "Maya Chen") by id, so every export lists them alike.
         return byId.values.sorted {
@@ -721,20 +732,12 @@ private final class Session: @unchecked Sendable {
         }
         body += "</ul>\n"
         let noted = try writeNotes(records, footer: footer)
-        let total = records.reduce(0) { $0 + $1.messages }
-        let dates = records.flatMap { [$0.first, $0.last] }.compactMap { $0 }
-            .compactMap { iso in (try? Date(iso, strategy: .iso8601)).map { (iso, $0) } }
-        let first = dates.min { $0.1 < $1.1 }?.0, last = dates.max { $0.1 < $1.1 }?.0
-        let range = first.map { "\(renderer.day($0)) → \(renderer.day(last))" }
-        let created = prior.map { p in (try? Date(p.created, strategy: .iso8601)).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? p.created }
-        let when = created.map { "exported \($0) · updated \(exported)" } ?? "exported \(exported)"
-        let only = request.services.map { "\(PlatformFilter.list($0)) only" }
-        let line = [Plural.count(records.count, "conversation"), Plural.count(total, "message"), range, only, when]
-            .compactMap { $0 }.map(HTML.escape).joined(separator: " · ")
+        let line = HTML.escape(summary(records))
         let name = prior?.archiveName ?? request.archiveName
         var header = "<h1>\(HTML.escape(name))</h1>\n<p>\(line)</p>"
         header += "\n<p>Read from: \(HTML.escape(readFrom.joined(separator: " · ")))</p>"
         if let noted { header += "\n<p>\(noted)</p>" }
+        header += "\n<p><a href=\"\(Explorer.page)\">Open the Message Explorer</a>: people and conversations, as in a messaging app</p>"
         // Typing narrows the list: a few lines of script, in the page, no network.
         if records.count > 1 {
             header += "\n<p class=\"index_filter\"><input type=\"search\" id=\"filter\" placeholder=\"Find a conversation\" aria-label=\"Find a conversation\"></p>"
@@ -753,6 +756,62 @@ private final class Session: @unchecked Sendable {
         }
         let page = style.pageHead(title: name, stylesheet: stylesheet, header: header) + body + style.pageFoot(footer: footer)
         try placeAndCount(Data(page.utf8), root.appendingPathComponent("index.html"))
+    }
+
+    /// The index's line about the whole archive: "206 conversations · 12,336 messages · Oct 23,
+    /// 2025 → Oct 22, 2026 · exported …".
+    func summary(_ records: [ArchiveState.Thread]) -> String {
+        let (counts, range, when) = summaryParts(records)
+        return ([counts, range] + when).compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The summary's parts: the counts, the dates ("Oct 23, 2025 → Oct 22, 2026"), and the rest
+    /// (the platforms when not all, when it was exported).
+    func summaryParts(_ records: [ArchiveState.Thread]) -> (counts: String, range: String?, when: [String]) {
+        let total = records.reduce(0) { $0 + $1.messages }
+        let dates = records.flatMap { [$0.first, $0.last] }.compactMap { $0 }
+            .compactMap { iso in (try? Date(iso, strategy: .iso8601)).map { (iso, $0) } }
+        let first = dates.min { $0.1 < $1.1 }?.0, last = dates.max { $0.1 < $1.1 }?.0
+        let range = first.map { "\(renderer.day($0)) → \(renderer.day(last))" }
+        let created = prior.map { p in (try? Date(p.created, strategy: .iso8601)).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? p.created }
+        let when = created.map { "exported \($0) · updated \(exported)" } ?? "exported \(exported)"
+        let only = request.services.map { "\(PlatformFilter.list($0)) only" }
+        return ("\(Plural.count(records.count, "conversation")) · \(Plural.count(total, "message"))", range, [only, when].compactMap { $0 })
+    }
+
+    /// `explorer.html` and `Explorer/list.js` (Milestone 22): every conversation in the archive
+    /// and the people in them, for the Explorer's lists. The messages are in each
+    /// conversation's own parts; one written before the Explorer existed has none, and the
+    /// Explorer links to its page instead.
+    func writeExplorer(_ records: [ArchiveState.Thread], stopped: Bool, footer: String) throws {
+        let name = prior?.archiveName ?? request.archiveName
+        let order: [(key: String, label: String)] = [("html", "Page"), ("transcript_html", "Transcript"), ("transcript", "Transcript PDF"),
+                                                     ("markdown", "Markdown"), ("json", "JSON")]
+        let conversations: [[String: Any]] = records.map { t in
+            let range = [renderer.minute(t.first), renderer.minute(t.last)].filter { !$0.isEmpty }.joined(separator: " → ")
+            return ["key": Explorer.key(t.id), "title": t.title, "group": t.isGroup, "sources": sourceNames(of: t).joined(separator: " + "),
+                    "messages": t.messages, "attachments": t.attachments, "missing": t.missing.count,
+                    "last": orNull(t.last), "day": renderer.day(t.last), "range": range, "parts": t.explorer ?? 0,
+                    "people": t.personIds, "incomplete": t.incomplete ?? false,
+                    "bates": t.bates.map { "Bates \($0.first) – \($0.last)" } ?? NSNull(),
+                    "links": order.compactMap { f in t.files[f.key].map { ["label": f.label, "path": $0] } }]
+        }
+        let ids = Set(records.flatMap(\.personIds))
+        let people: [[String: Any]] = request.people.filter { ids.contains($0.id) }.map { p in
+            ["id": p.id, "name": orNull(p.name), "handles": p.handles, "contacts": p.inContacts]
+        }
+        let parts = summaryParts(records)
+        let object: [String: Any] = [
+            "name": name, "summary": summary(records), "range": orNull(parts.range),
+            "about": ([parts.counts] + parts.when).joined(separator: " · "), "read_from": readFrom.joined(separator: " · "), "me": renderer.me,
+            "exported": "Exported by MessageArchiver \(AppVersion.full) on \(exported)", "stopped": stopped,
+            "incomplete": failed.sorted { $0.key < $1.key }.map { "\(describe($0.key)) couldn’t be read during this export (\($0.value))." },
+            "conversations": conversations, "people": people,
+        ]
+        let list = "MA.list(\(JSONWriter.encode(object)));\n"
+        try placeAndCount(Data(list.utf8), root.appendingPathComponent("\(Explorer.folder)/list.js"))
+        let page = explorer.kit.page.replacingOccurrences(of: "{{title}}", with: HTML.escape(name))
+        try placeAndCount(Data(page.utf8), root.appendingPathComponent(Explorer.page))
     }
 
     static let notesPage = "attachment-notes.html"
