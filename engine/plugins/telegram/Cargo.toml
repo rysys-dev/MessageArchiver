@@ -1,6 +1,6 @@
 [package]
 name = "ma-telegram"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "MessageArchiver's Telegram plug-in: reads Telegram's data export (JSON) read-only, as NDJSON (Milestone 21)"

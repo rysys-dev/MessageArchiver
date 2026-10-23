@@ -83,8 +83,9 @@ fn folder(given: &Path) -> PathBuf {
     if given.join(export::RESULT).exists() {
         return given.to_path_buf();
     }
+    // Telegram's own exports only: another app's result.json in Downloads is passed over.
     let exports_in = |dir: &Path| -> Vec<PathBuf> {
-        std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.join(export::RESULT).is_file()).collect()
+        std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| export::check(p).unwrap_or(false)).collect()
     };
     let mut found = exports_in(given);
     found.extend(exports_in(&given.join("Telegram Desktop")));
@@ -148,6 +149,7 @@ fn run(args: &Args, out: &mut Output) -> Result<u64, Error> {
 fn probe(dir: &Path) -> ProbeLine {
     let (status, detail) = match export::check(dir) {
         Ok(true) => ("ready", None),
+        Ok(false) if dir.join(export::RESULT).is_file() => ("not_readable", Some("this folder’s result.json isn’t from Telegram: choose the folder Telegram saved its export in".to_string())),
         Ok(false) => ("not_readable", Some("this folder isn’t a Telegram export with its JSON: export again with Format set to Machine-readable JSON (or Both), and choose the folder Telegram saved".to_string())),
         Err(e) if e.code == "permission_denied" => ("permission_denied", Some(e.message)),
         Err(e) => ("not_readable", Some(e.message)),

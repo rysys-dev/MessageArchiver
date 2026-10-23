@@ -20,7 +20,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Deserialize;
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor},
+};
 use serde_json::Value;
 
 /// What went wrong, with the code the app's notice reads (docs/engine-protocol.md).
@@ -59,13 +62,88 @@ impl From<io::Error> for Error {
 
 pub const RESULT: &str = "result.json";
 
-/// Whether a folder is a Telegram export with its JSON: `Ok(false)` when it isn't one.
+/// Whether a folder is a Telegram export with its JSON: `Ok(false)` when it isn't one. A
+/// `result.json` alone isn't enough, since another app's would pass (plug-in 1.0.1): it must be
+/// a JSON object with Telegram's own fields, `personal_information` with the owner's
+/// `user_id`, or `chats` with its `list`. It is read only until one of them is found, and what
+/// comes before is skipped, not kept, so a large export is checked as quickly as a small one.
 pub fn check(folder: &Path) -> Result<bool, Error> {
-    match fs::metadata(folder.join(RESULT)) {
-        Ok(m) => Ok(m.is_file()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
-        Err(e) if e.kind() == ErrorKind::PermissionDenied => Err(denied(folder)),
-        Err(e) => Err(Error::new("io", format!("{}: {e}", folder.display()))),
+    let path = folder.join(RESULT);
+    let file = match fs::metadata(&path).and_then(|m| if m.is_file() { fs::File::open(&path).map(Some) } else { Ok(None) }) {
+        Ok(Some(f)) => f,
+        Ok(None) => return Ok(false),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => return Err(denied(folder)),
+        Err(e) => return Err(Error::new("io", format!("{}: {e}", folder.display()))),
+    };
+    let mut json = serde_json::Deserializer::from_reader(io::BufReader::with_capacity(1 << 16, file));
+    match json.deserialize_map(Shape) {
+        Ok(found) => Ok(found),
+        Err(e) if e.to_string().starts_with(FOUND) => Ok(true),
+        Err(e) if e.is_io() => Err(Error::new("io", format!("{}: {e}", path.display()))),
+        // Not JSON, or not an object: someone else's file.
+        Err(_) => Ok(false),
+    }
+}
+
+/// Stops the reading as soon as Telegram's fields are found: serde_json would otherwise read
+/// on to the end of the object.
+const FOUND: &str = "Telegram's fields found";
+
+/// `result.json`'s top level: an object holding Telegram's fields.
+struct Shape;
+
+impl<'de> Visitor<'de> for Shape {
+    type Value = bool;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Telegram export's result.json")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<bool, A::Error> {
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "personal_information" => {
+                    if map.next_value::<Owner>()?.user_id.is_some() {
+                        return Err(de::Error::custom(FOUND));
+                    }
+                }
+                "chats" => map.next_value_seed(ChatsShape)?,
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// `chats`: an object whose `list` is found before a single chat is read.
+struct ChatsShape;
+
+impl<'de> DeserializeSeed<'de> for ChatsShape {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        d.deserialize_map(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ChatsShape {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Telegram's chats")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "list" {
+                return Err(de::Error::custom(FOUND));
+            }
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(())
     }
 }
 
@@ -262,6 +340,9 @@ pub struct Export {
 impl Export {
     pub fn open(folder: &Path) -> Result<Self, Error> {
         if !check(folder)? {
+            if folder.join(RESULT).is_file() {
+                return Err(Error::new("not_readable", format!("the {RESULT} in {} isn’t a Telegram export’s", folder.display())));
+            }
             return Err(Error::new("not_found", format!("{} isn’t a Telegram export (no {RESULT}: choose Machine-readable JSON when exporting)", folder.display())));
         }
         let path = folder.join(RESULT);
