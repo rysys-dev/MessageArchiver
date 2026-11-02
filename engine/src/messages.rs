@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use chrono::{DateTime, Local, SecondsFormat, Utc};
 use imessage_database::{
@@ -116,7 +119,7 @@ struct Context<'a> {
 
 pub fn run(source: &Source, filter: &MessageFilter, out: &mut Output) -> Result<(), EngineError> {
     let index = Index::build(source)?;
-    let query = query_context(&index, filter)?;
+    let query = query_context(source, &index, filter)?;
     let ctx = Context { source, extract_to: filter.extract_to.as_deref(), index: &index, tapbacks: Message::cache(&source.db)? };
 
     let total = Message::get_count(&source.db, &source.capabilities, &query)?.max(0) as u64;
@@ -125,7 +128,7 @@ pub fn run(source: &Source, filter: &MessageFilter, out: &mut Output) -> Result<
 
     let mut seen = 0u64;
     let mut written = 0u64;
-    let mut previous = None;
+    let mut once = Once::default();
     for row in Message::rows(&mut stmt, [])? {
         seen += 1;
         progress.report(seen, false);
@@ -137,10 +140,9 @@ pub fn run(source: &Source, filter: &MessageFilter, out: &mut Output) -> Result<
             }
         };
         // A message in several chats comes back once per chat; keep the first.
-        if previous == Some(msg.rowid) {
+        if !once.first(msg.date, msg.rowid) {
             continue;
         }
-        previous = Some(msg.rowid);
         if filter.since_rowid.is_some_and(|n| msg.rowid <= n) {
             continue;
         }
@@ -164,10 +166,44 @@ pub fn run(source: &Source, filter: &MessageFilter, out: &mut Output) -> Result<
     Ok(())
 }
 
-fn query_context(index: &Index, filter: &MessageFilter) -> Result<QueryContext, EngineError> {
+/// Whether a row is a message's first. The query orders by date alone, so one message's rows
+/// (one per chat) needn't be next to each other when another shares its date (audit W6): the
+/// rowids seen at the current date are kept, and forgotten when the date moves on.
+#[derive(Default)]
+struct Once {
+    date: Option<i64>,
+    seen: HashSet<i32>,
+}
+
+impl Once {
+    fn first(&mut self, date: i64, rowid: i32) -> bool {
+        if self.date != Some(date) {
+            self.date = Some(date);
+            self.seen.clear();
+        }
+        self.seen.insert(rowid)
+    }
+}
+
+fn query_context(source: &Source, index: &Index, filter: &MessageFilter) -> Result<QueryContext, EngineError> {
     let mut q = QueryContext::default();
     if let Some(start) = &filter.start {
         q.set_start(start).map_err(|e| EngineError::usage(e.to_string()))?;
+    }
+    // Only messages after `since_rowid` are wanted, and imessage-database filters by date, not
+    // rowid: start the scan at the oldest date among them, so an update doesn't read the whole
+    // database (audit M10). Not when one has no date, which a date filter would drop.
+    if let Some(n) = filter.since_rowid {
+        let (oldest, undated): (Option<i64>, i64) = source.db.query_row(
+            "SELECT MIN(date), COALESCE(SUM(date IS NULL), 0) FROM message WHERE ROWID > ?1",
+            [n],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if undated == 0 {
+            // None at all after it: a date after every message's.
+            let from = oldest.unwrap_or(i64::MAX);
+            q.start = Some(q.start.map_or(from, |s| s.max(from)));
+        }
     }
     if let Some(end) = &filter.end {
         q.set_end(end).map_err(|e| EngineError::usage(e.to_string()))?;
@@ -430,5 +466,18 @@ fn announcement(ctx: &Context, msg: &Message) -> Option<Value> {
             GroupAction::ChatBackgroundRemoved => json!({ "type": "background_removed" }),
             GroupAction::PhoneNumberChanged(who) => json!({ "type": "phone_number_changed", "handle": handle(who) }),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Once;
+
+    #[test]
+    fn a_message_comes_once_even_interleaved_with_another_of_its_date() {
+        let mut once = Once::default();
+        let rows = [(1, 10), (2, 20), (2, 21), (2, 20), (2, 21), (3, 30), (3, 30)];
+        let kept: Vec<i32> = rows.iter().filter(|(d, r)| once.first(*d, *r)).map(|(_, r)| *r).collect();
+        assert_eq!(kept, vec![10, 20, 21, 30]);
     }
 }

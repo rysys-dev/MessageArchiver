@@ -124,19 +124,26 @@ public struct Engine: Sendable {
     }
 
     /// `MAR_ENGINE` if set (tests and debug runs), else `Contents/Helpers/ma-engine` in the app.
+    /// Debug builds only: in a release, whatever an environment variable named would run with
+    /// the app's Full Disk Access and be handed a backup's password (audit 2026-11-01, H4).
     public static func bundled(in bundle: Bundle = .main,
                                environment: [String: String] = ProcessInfo.processInfo.environment) -> Engine? {
+        #if DEBUG
         if let override = environment["MAR_ENGINE"], !override.isEmpty {
             return Engine(executable: URL(fileURLWithPath: override))
         }
+        #endif
         let helper = bundle.bundleURL.appendingPathComponent("Contents/Helpers/ma-engine")
         return FileManager.default.isExecutableFile(atPath: helper.path) ? Engine(executable: helper) : nil
     }
 
     static let sandboxExec = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
 
-    /// The sandbox: everything allowed but the network, and writing anywhere but `writable`.
-    static func profile(writable: [String]) -> String {
+    /// The sandbox: everything allowed but the network, writing anywhere but `writable`, and
+    /// what could get data out another way (audit M1): starting any program but the plug-in
+    /// itself (`open` would hand a URL to the browser), Apple Events, Launch Services and the
+    /// pasteboard. Debug builds also let the shells start, as the tests' engines are scripts.
+    static func profile(writable: [String], executable: String) -> String {
         let quote = { (path: String) in
             "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         }
@@ -149,7 +156,14 @@ public struct Engine: Sendable {
         }
         let allowed = writable.map { "(subpath \(quote(real($0))))" }
             + ["(literal \"/dev/null\")", "(literal \"/dev/tty\")"]
+        var programs = [real(executable)]
+        #if DEBUG
+        programs += ["/bin/sh", "/bin/bash"]
+        #endif
+        let runnable = programs.map { "(literal \(quote($0)))" }.joined(separator: " ")
+        let services = ["com.apple.coreservices.launchservicesd", "com.apple.pasteboard.1"].map { "(global-name \"\($0)\")" }.joined(separator: " ")
         return "(version 1)(allow default)(deny network*)(deny file-write* (require-not (require-any \(allowed.joined(separator: " ")))))"
+            + "(deny process-exec (require-not (require-any \(runnable))))(deny appleevent-send)(deny mach-lookup \(services))"
     }
 
     /// Engines beside Messages' own. Until plug-ins can be installed and checked (Milestone
@@ -235,7 +249,7 @@ public struct Engine: Sendable {
             var writable = [tmp.path]
             if let i = arguments.firstIndex(of: "--extract-to"), i + 1 < arguments.count { writable.append(arguments[i + 1]) }
             process.executableURL = Self.sandboxExec
-            process.arguments = ["-p", Self.profile(writable: writable), executable.path] + arguments
+            process.arguments = ["-p", Self.profile(writable: writable, executable: executable.path), executable.path] + arguments
             var environment = ProcessInfo.processInfo.environment
             environment["TMPDIR"] = tmp.path + "/"
             process.environment = environment
@@ -255,7 +269,9 @@ public struct Engine: Sendable {
             throw EngineError(code: "not_runnable", message: "ma-engine couldn't be started: \(error.localizedDescription)", exitCode: -1)
         }
         if let input, let stdin {
-            // One short line: it fits in the pipe's buffer, so this never blocks.
+            // One short line: it fits in the pipe's buffer, so this never blocks. An engine
+            // that has already ended makes it fail, not end the app (SIGPIPE ignored; audit L1).
+            _ = Self.brokenPipesIgnored
             try? input.fileHandleForWriting.write(contentsOf: stdin)
             try? input.fileHandleForWriting.close()
         }
@@ -288,7 +304,10 @@ public struct Engine: Sendable {
                 }
                 return true
             }
-            async let lines: Void = Self.readLines(stdout.fileHandleForReading) { line in
+            async let lines: Void = Self.readLines(stdout.fileHandleForReading, tooLong: {
+                lineError.set(EngineError(code: "line_too_long", message: "\(executable.lastPathComponent) wrote a line too long to be a message, so it was stopped", exitCode: -1))
+                running.stop()
+            }) { line in
                 heard.now()
                 do {
                     try onLine(line)
@@ -325,24 +344,47 @@ public struct Engine: Sendable {
     /// reader that never ran), so this blocks a dispatch thread instead of Swift's shared pool.
     /// When `each` returns false the rest is read and dropped, so the engine is never left
     /// waiting on a full pipe.
-    static func readLines(_ handle: FileHandle, _ each: @escaping @Sendable (Data) -> Bool) async {
+    /// A line longer than `maxLine` (no engine writes one; a broken one might, without end) is
+    /// dropped and `tooLong` called, rather than held in memory; each chunk is searched only
+    /// from where the last search stopped (audit L2).
+    /// SIGPIPE, raised by a write to a pipe whose reader has gone, ends a process unless it is
+    /// ignored; then the write fails instead.
+    static let brokenPipesIgnored: Void = { signal(SIGPIPE, SIG_IGN) }()
+
+    static func readLines(_ handle: FileHandle, maxLine: Int = 64 << 20, tooLong: @escaping @Sendable () -> Void = {},
+                          _ each: @escaping @Sendable (Data) -> Bool) async {
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 var pending = Data()
                 var wanted = true
+                var skipping = false
                 while true {
                     let chunk = handle.availableData
                     if chunk.isEmpty { break }
                     guard wanted else { continue }
+                    // Only the new bytes can hold the newline that ends what is pending.
+                    var searchFrom = pending.count
                     pending.append(chunk)
                     var start = pending.startIndex
-                    while wanted, let newline = pending[start...].firstIndex(of: 0x0A) {
-                        if newline > start { wanted = each(Data(pending[start..<newline])) }
+                    while wanted, let newline = pending[(pending.startIndex + searchFrom)...].firstIndex(of: 0x0A) {
+                        if skipping {
+                            skipping = false
+                        } else if newline - start > maxLine {
+                            tooLong()
+                        } else if newline > start {
+                            wanted = each(Data(pending[start..<newline]))
+                        }
                         start = pending.index(after: newline)
+                        searchFrom = start - pending.startIndex
                     }
                     pending = Data(pending[start...])
+                    if pending.count > maxLine {
+                        if !skipping { tooLong() }
+                        skipping = true
+                        pending = Data()
+                    }
                 }
-                if wanted, !pending.isEmpty { _ = each(pending) }
+                if wanted, !skipping, !pending.isEmpty { _ = each(pending) }
                 done.resume()
             }
         }

@@ -78,6 +78,8 @@ public enum SearchIndex {
 final class SearchIndexWriter {
     private var db: OpaquePointer?
     private var insert: OpaquePointer?
+    private var rememberQuote: OpaquePointer?
+    private var recallQuote: OpaquePointer?
 
     struct Row {
         var rowid: Int
@@ -117,6 +119,7 @@ final class SearchIndexWriter {
         }
         try exec("CREATE INDEX IF NOT EXISTS messages_source_thread ON messages(source, thread_id, date)")
         try exec("BEGIN")
+        firstNew = Self.maxId(db) + 1
         if replacingAll {
             try exec("DELETE FROM messages")
         } else if !threads.isEmpty {
@@ -127,11 +130,39 @@ final class SearchIndexWriter {
                                  has_attachment, page, anchor, body, source, service) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """
         guard sqlite3_prepare_v2(db, sql, -1, &insert, nil) == SQLITE_OK else { throw SearchError.sqlite(String(cString: sqlite3_errmsg(db))) }
+        // What a reply quotes, for this run only: SQLite keeps it on disk once it outgrows its
+        // cache, where a dictionary held every message's for the whole export (audit M14).
+        try exec("CREATE TEMP TABLE IF NOT EXISTS quotes(guid TEXT PRIMARY KEY, sender TEXT NOT NULL, snippet TEXT NOT NULL) WITHOUT ROWID")
+        guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO temp.quotes(guid, sender, snippet) VALUES (?, ?, ?)", -1, &rememberQuote, nil) == SQLITE_OK,
+              sqlite3_prepare_v2(db, "SELECT sender, snippet FROM temp.quotes WHERE guid = ?", -1, &recallQuote, nil) == SQLITE_OK else {
+            throw SearchError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
     deinit {
         sqlite3_finalize(insert)
+        sqlite3_finalize(rememberQuote)
+        sqlite3_finalize(recallQuote)
         sqlite3_close(db)
+    }
+
+    /// A message a later reply may quote.
+    func remember(_ q: QuotedReply) {
+        let s = rememberQuote
+        sqlite3_reset(s)
+        bind(s, 1, q.guid)
+        bind(s, 2, q.sender)
+        bind(s, 3, q.snippet)
+        sqlite3_step(s)
+    }
+
+    /// The message a reply quotes, when this run has had it.
+    func quote(_ guid: String) -> QuotedReply? {
+        let s = recallQuote
+        sqlite3_reset(s)
+        bind(s, 1, guid)
+        guard sqlite3_step(s) == SQLITE_ROW, let sender = sqlite3_column_text(s, 0), let snippet = sqlite3_column_text(s, 1) else { return nil }
+        return QuotedReply(guid: guid, sender: String(cString: sender), snippet: String(cString: snippet))
     }
 
     func add(_ r: Row) {
@@ -168,6 +199,40 @@ final class SearchIndexWriter {
     func finish() throws {
         try exec("COMMIT")
         try exec("INSERT INTO fts(fts) VALUES ('optimize')")
+    }
+
+    /// Ends an archive's update: the conversations `replacing` lose their earlier entries for
+    /// this run's, and those `dropping` (kept as they were) keep their earlier ones, this run's
+    /// dropped. Everything in one transaction, so a failed update changes nothing.
+    func finish(replacing: [ThreadRef], dropping: [ThreadRef]) throws {
+        if !replacing.isEmpty { try exec("DELETE FROM messages WHERE id < \(firstNew) AND (\(SearchIndex.threadsClause(replacing)))") }
+        if !dropping.isEmpty { try exec("DELETE FROM messages WHERE id >= \(firstNew) AND (\(SearchIndex.threadsClause(dropping)))") }
+        try finish()
+    }
+
+    /// The GUIDs of a conversation's messages as the archive had them when this writer opened,
+    /// or nil when they can't be read.
+    func archivedGuids(_ thread: ThreadRef) -> Set<String>? {
+        var s: OpaquePointer?
+        defer { sqlite3_finalize(s) }
+        let sql = "SELECT guid FROM messages WHERE id < \(firstNew) AND (\(SearchIndex.threadsClause([thread])))"
+        guard sqlite3_prepare_v2(db, sql, -1, &s, nil) == SQLITE_OK else { return nil }
+        var out = Set<String>()
+        while sqlite3_step(s) == SQLITE_ROW {
+            if let text = sqlite3_column_text(s, 0) { out.insert(String(cString: text)) }
+        }
+        return out
+    }
+
+    /// The first row this writer adds: every row before it was there when it opened.
+    private var firstNew: Int64 = 0
+
+    private static func maxId(_ db: OpaquePointer?) -> Int64 {
+        var s: OpaquePointer?
+        defer { sqlite3_finalize(s) }
+        guard sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(id), 0) FROM messages", -1, &s, nil) == SQLITE_OK,
+              sqlite3_step(s) == SQLITE_ROW else { return 0 }
+        return sqlite3_column_int64(s, 0)
     }
 
     private func exec(_ sql: String) throws {

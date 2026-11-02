@@ -131,6 +131,18 @@ public enum PluginStore {
             throw PluginError.notAPlugin(archive.lastPathComponent)
         }
         let manifest = try readManifest(in: root)
+        // What it says it is, and the page it shows, are signed as its program is (audit M9).
+        // One from before they were (1.0's plug-ins) isn't installed: the current one is.
+        for file in ["plugin.json", "instructions.html"] {
+            let url = root.appendingPathComponent(file)
+            guard fm.fileExists(atPath: url.path) else { throw PluginError.untrusted(name: manifest.name, why: "it has no \(file)") }
+            if let why = PluginTrust.problem(with: url, requirement: requirement) {
+                let detail = why.hasPrefix("its ") ? "\(file)’s \(why.dropFirst(4))"
+                    : why == "it isn’t signed" ? "its \(file) isn’t signed (a plug-in from before they were; download the current version)"
+                    : "its \(file) \(why.hasPrefix("it ") ? String(why.dropFirst(3)) : why)"
+                throw PluginError.untrusted(name: manifest.name, why: detail)
+            }
+        }
         guard manifest.id != .messages else { throw PluginError.reserved(manifest.id.rawValue) }
         guard manifest.protocol == Engine.protocolVersion else {
             throw PluginError.wrongProtocol(name: manifest.name, speaks: manifest.protocol)

@@ -75,10 +75,9 @@ public struct SavedSettings: Sendable, Hashable, Codable {
 public enum SettingsStore {
     public static var url: URL { AppPaths.support.appendingPathComponent("settings.json") }
 
-    /// A new install's settings when there is no file, or it can't be read.
+    /// A new install's settings when there is no file, or it can't be read (then moved aside).
     public static func load(from url: URL = url) -> SavedSettings {
-        guard let data = try? Data(contentsOf: url) else { return SavedSettings() }
-        return (try? JSONDecoder().decode(SavedSettings.self, from: data)) ?? SavedSettings()
+        AppPaths.load(SavedSettings.self, from: url, default: SavedSettings())
     }
 
     public static func save(_ settings: SavedSettings, to url: URL = url) throws {

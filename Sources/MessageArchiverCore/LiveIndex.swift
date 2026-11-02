@@ -88,6 +88,8 @@ private final class Feeder: @unchecked Sendable {
     let keep: Set<ThreadRef>?
     let progress: @Sendable (Int, Int) -> Void
     private var count = 0
+    /// Set from the stderr reader's thread, read on the stdout reader's: under the lock (L3).
+    private let lock = NSLock()
     private var expected = 0
     private var last = Date.distantPast
 
@@ -99,7 +101,7 @@ private final class Feeder: @unchecked Sendable {
     }
 
     func total(_ done: Int, _ total: Int) {
-        expected = total
+        lock.withLock { expected = total }
         progress(done, total)
     }
 
@@ -108,7 +110,7 @@ private final class Feeder: @unchecked Sendable {
         let thread = ThreadRef(engine: m.threadId, in: source)
         if let keep, !keep.contains(thread) { return }
         let files = m.attachments.filter { $0.appPayload != true }
-        var body = m.text ?? ""
+        var body = [m.note, m.text].compactMap { $0 }.joined(separator: "\n")
         if !files.isEmpty { body += "\n" + files.map { "📎 " + ($0.filename ?? "attachment") }.joined(separator: "\n") }
         writer.add(.init(rowid: m.rowid, guid: m.guid, threadId: thread, threadTitle: "", service: m.service, sender: m.senderHandle ?? (m.isFromMe ? "Me" : ""),
                          handle: m.senderHandle, personId: nil, fromMe: m.isFromMe, date: m.date, hasAttachment: !files.isEmpty,
@@ -116,7 +118,7 @@ private final class Feeder: @unchecked Sendable {
         count += 1
         if Date.now.timeIntervalSince(last) > 0.25 {
             last = .now
-            progress(count, max(expected, count))
+            progress(count, max(lock.withLock { expected }, count))
         }
     }
 }

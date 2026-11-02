@@ -65,6 +65,10 @@ finished app needs neither.
   streams NDJSON to the app and is shipped
   inside the bundle at `Contents/Helpers/ma-engine`.
 
+Comments in the source cite the design notes the app was built from ("spec §9", "Milestone
+12", "decision Q4", "audit H7"). Those notes aren't published; the comments say what each
+rule is, and the reference is only where it was decided.
+
 ## License and attribution
 
 MessageArchiver is free software under the **GNU General Public License v3.0** ([`LICENSE`](LICENSE)).

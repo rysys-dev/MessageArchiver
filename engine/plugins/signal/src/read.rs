@@ -134,11 +134,7 @@ pub fn threads(export: &Export, out: &mut dyn FnMut(&ThreadLine) -> std::io::Res
 pub fn handles(export: &Export, out: &mut dyn FnMut(&HandleLine) -> std::io::Result<()>) -> Result<u64, Error> {
     // Everyone in a chat read, and everyone who wrote in one.
     let mut people: BTreeSet<String> = threads_of(export).into_iter().flat_map(|t| t.people).collect();
-    let mut file = export.reader()?;
-    for i in &export.items {
-        let item = export.item(i, &mut file)?;
-        people.extend(export.handle_of(str(&item, "authorId")));
-    }
+    people.extend(export.authors.iter().cloned());
     let names: BTreeMap<&str, Option<&String>> = export
         .recipients
         .values()

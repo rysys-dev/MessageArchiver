@@ -1,6 +1,6 @@
 [package]
 name = "ma-signal"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "MessageArchiver's Signal plug-in: reads Signal Desktop's plain export read-only, as NDJSON (Milestone 20)"

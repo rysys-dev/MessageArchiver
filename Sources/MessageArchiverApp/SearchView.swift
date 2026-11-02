@@ -97,8 +97,9 @@ final class SearchModel {
     }
 
     func openInBrowser() {
-        guard let root, let page = selected?.page else { return }
-        NSWorkspace.shared.open(root.appendingPathComponent(page))
+        // Only a page of the archive's own: its index could be damaged (audit M4).
+        guard let root, let page = selected?.page, page.hasSuffix(".html"), let url = ArchiveState.file(page, in: root) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -310,7 +311,7 @@ private struct PageView: NSViewRepresentable {
     func updateNSView(_ web: WKWebView, context: Context) {
         let c = context.coordinator
         c.anchor = anchor
-        let url = root.appendingPathComponent(page)
+        guard let url = ArchiveState.file(page, in: root) else { return }
         if c.loaded != url {
             c.loaded = url
             web.loadFileURL(url, allowingReadAccessTo: root)

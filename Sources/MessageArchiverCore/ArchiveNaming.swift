@@ -2,25 +2,51 @@ import Foundation
 
 /// File and folder names inside an archive (spec §9.1, §9.7).
 public enum ArchiveNaming {
-    /// Safe on APFS, SMB shares and FAT/exFAT drives: no `/ \ : * ? " < > |`, no control
-    /// characters, no leading dot, no trailing dot or space, and not too long.
-    public static func sanitize(_ name: String, maxLength: Int = 100) -> String {
+    /// Safe on APFS, SMB shares and FAT/exFAT drives: no `/ \\ : * ? " < > |`, no control
+    /// characters, no leading dot, no trailing dot or space, and not too long: at most
+    /// `maxLength` characters and `maxBytes` UTF-8 bytes (a disk allows 255 bytes, and an emoji
+    /// takes four), cut between characters. `keepExtension` cuts a file name's stem instead, so
+    /// a long photo name is still a `.jpeg` (audit 2026-11-01, W1).
+    public static func sanitize(_ name: String, maxLength: Int = 100, maxBytes: Int = 200, keepExtension: Bool = false) -> String {
         let forbidden = Set("/\\:*?\"<>|")
         var cleaned = String(name.map { forbidden.contains($0) || $0.isNewline || ($0.asciiValue.map { $0 < 32 } ?? false) ? "-" : $0 })
         cleaned = cleaned.trimmingCharacters(in: .whitespaces)
         while cleaned.hasPrefix(".") { cleaned.removeFirst() }
-        if cleaned.count > maxLength { cleaned = String(cleaned.prefix(maxLength)) }
+        if cleaned.count > maxLength || cleaned.utf8.count > maxBytes {
+            let ext = (cleaned as NSString).pathExtension
+            if keepExtension, !ext.isEmpty, ext.utf8.count <= 10, cleaned.count > ext.count + 1 {
+                var stem = prefix(String(cleaned.dropLast(ext.count + 1)), maxLength - ext.count - 1, maxBytes - ext.utf8.count - 1)
+                while stem.hasSuffix(".") || stem.hasSuffix(" ") { stem.removeLast() }
+                cleaned = stem.isEmpty ? "Untitled." + ext : stem + "." + ext
+            } else {
+                cleaned = prefix(cleaned, maxLength, maxBytes)
+            }
+        }
         while cleaned.hasSuffix(".") || cleaned.hasSuffix(" ") { cleaned.removeLast() }
         return cleaned.isEmpty ? "Untitled" : cleaned
     }
 
+    /// The longest start of `text` within both limits, whole characters only.
+    private static func prefix(_ text: String, _ characters: Int, _ bytes: Int) -> String {
+        var end = text.startIndex, count = 0, size = 0
+        for c in text {
+            let n = c.utf8.count
+            guard count < characters, size + n <= bytes else { break }
+            count += 1
+            size += n
+            end = text.index(after: end)
+        }
+        return String(text[..<end])
+    }
+
     /// `<Person or Group Name> (<short-id>)` (spec §9.1); the id keeps two "Jane Doe"s apart.
+    /// At most 200 bytes of title, so `.<name>.entries.part` stays under 255.
     /// Messages' conversations keep 1.0's names, "Title (10)", so an update finds its files;
     /// another source's carry its name, "Title (whatsapp 10)".
     public static func threadFile(title: String, threadId: ThreadRef) -> String {
-        let source = threadId.source == .messages ? nil : sanitize(threadId.source.rawValue, maxLength: 30)
+        let source = threadId.source == .messages ? nil : sanitize(threadId.source.rawValue, maxLength: 30, maxBytes: 30)
         if threadId.isNoConversation { return "Not in a conversation" + (source.map { " (\($0))" } ?? "") }
-        return "\(sanitize(title, maxLength: 90)) (\(source.map { "\($0) " } ?? "")\(threadId.id))"
+        return "\(sanitize(title, maxLength: 90, maxBytes: 200)) (\(source.map { "\($0) " } ?? "")\(threadId.id))"
     }
 
     /// `YYYY-MM-DD_HHMMSS` in the message's local time, for attachment names.

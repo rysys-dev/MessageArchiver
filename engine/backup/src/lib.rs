@@ -84,14 +84,42 @@ pub enum Secret {
 }
 
 impl Secret {
+    /// The line the app sends on stdin. The line is wiped once read, and the secret is moved
+    /// out of the parsed JSON, never copied (audit L8).
     pub fn read() -> Option<Secret> {
         let mut line = String::new();
-        io::stdin().lock().read_line(&mut line).ok()?;
-        let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
-        if let Some(k) = value.get("key").and_then(|v| v.as_str()) {
-            return Some(Secret::Key(k.to_string()));
+        let read = io::stdin().lock().read_line(&mut line);
+        let value = serde_json::from_str::<serde_json::Value>(line.trim());
+        wipe_string(&mut line);
+        read.ok()?;
+        let serde_json::Value::Object(mut fields) = value.ok()? else { return None };
+        match (fields.remove("key"), fields.remove("password")) {
+            (Some(serde_json::Value::String(k)), _) => Some(Secret::Key(k)),
+            (_, Some(serde_json::Value::String(p))) => Some(Secret::Password(p)),
+            _ => None,
         }
-        value.get("password").and_then(|v| v.as_str()).map(|p| Secret::Password(p.to_string()))
+    }
+}
+
+/// Overwrites a secret in memory when it goes. crabapple keeps its own copy while a backup is
+/// open, which this can't reach; the engine's own copies are wiped (audit L8).
+impl Drop for Secret {
+    fn drop(&mut self) {
+        wipe(self);
+    }
+}
+
+fn wipe(secret: &mut Secret) {
+    match secret {
+        Secret::Password(s) | Secret::Key(s) => wipe_string(s),
+    }
+}
+
+fn wipe_string(s: &mut String) {
+    // SAFETY: zeros are valid UTF-8, and the length stays the same.
+    for b in unsafe { s.as_mut_vec() }.iter_mut() {
+        // Volatile, so the writes aren't dropped as dead before the memory is freed.
+        unsafe { std::ptr::write_volatile(b, 0) };
     }
 }
 
@@ -104,6 +132,18 @@ pub fn password_needed() -> Error {
 /// as soon as it's open (an empty file takes its place, for crabapple to remove), and the folder
 /// goes when the engine exits. Killed, the engine leaves an empty folder behind, no data.
 pub fn unlock(root: &Path, secret: &Secret) -> Result<(crabapple::Backup, Scratch), Error> {
+    // crabapple would open an unencrypted backup's Manifest.db read-write: never (audit L8).
+    if !is_encrypted(root)? {
+        return Err(Error::new("not_encrypted", format!("{} isn’t an encrypted backup", root.display())));
+    }
+    // A derived key is 32 bytes as 64 hex digits. Anything else is a wrong key, and never
+    // reaches crabapple, whose hex decoding panics on a non-ASCII character and prints the
+    // key in its message (audit W10).
+    if let Secret::Key(k) = secret
+        && !(k.len() == 64 && k.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err(Error::new("wrong_password", "that key doesn’t open this backup"));
+    }
     let scratch = Scratch::new()?;
     let auth = match secret {
         Secret::Password(p) => crabapple::Authentication::Password(p.clone()),
@@ -118,16 +158,27 @@ pub fn unlock(root: &Path, secret: &Secret) -> Result<(crabapple::Backup, Scratc
     Ok((backup, scratch))
 }
 
-/// Decrypts one file into `target` (mode 0600, never over an existing file): `Ok(false)` when
-/// the backup has no such file.
+/// Decrypts one file into `target` (mode 0600): `Ok(false)` when the backup has no such file.
+/// Decrypted into a hidden `.<name>.part` beside it and renamed when whole, so `target` is
+/// never a partial file; one already there is kept only when its length is the backup's,
+/// otherwise (a run killed in mid-decrypt before this was so) it is decrypted again (audit W5).
 pub fn decrypt_to(backup: &crabapple::Backup, id: &str, target: &Path) -> Result<bool, Error> {
     let Ok(entry) = backup.get_file(id) else { return Ok(false) };
-    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(target)?;
-    let mut plain = backup.decrypt_entry_stream(&entry).map_err(|e| Error::new("database", e.to_string()))?;
-    if let Err(e) = io::copy(&mut plain, &mut file) {
-        drop(file);
-        let _ = std::fs::remove_file(target);
-        return Err(e.into());
+    if std::fs::symlink_metadata(target).is_ok_and(|m| m.is_file() && m.len() == entry.metadata.size) {
+        return Ok(true);
+    }
+    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let part = target.with_file_name(format!(".{name}.part"));
+    let _ = std::fs::remove_file(&part);
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&part)?;
+    let copied = backup
+        .decrypt_entry_stream(&entry)
+        .map_err(|e| Error::new("database", e.to_string()))
+        .and_then(|mut plain| io::copy(&mut plain, &mut file).map_err(Error::from));
+    drop(file);
+    if let Err(e) = copied.and_then(|_| std::fs::rename(&part, target).map_err(Error::from)) {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
     }
     Ok(true)
 }
@@ -168,5 +219,22 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_secret_is_wiped_when_dropped() {
+        let mut s = Secret::Password("hunter2".into());
+        let bytes = match &mut s {
+            Secret::Password(p) | Secret::Key(p) => p.as_ptr(),
+        };
+        wipe(&mut s);
+        let Secret::Password(p) = &s else { unreachable!() };
+        assert!(p.bytes().all(|b| b == 0));
+        assert_eq!(p.as_ptr(), bytes, "in place");
     }
 }

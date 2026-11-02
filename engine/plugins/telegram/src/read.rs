@@ -13,7 +13,7 @@ use ma_protocol::lines::{
 };
 use serde_json::{Value, json};
 
-use crate::export::{self, Chat, Error, Export, ItemRef, Message, guid, id_of, user_id};
+use crate::export::{self, Chat, Error, Export, ItemRef, Message, guid, id_of, parse, user_id};
 
 pub const SERVICE: &str = "Telegram";
 
@@ -76,14 +76,15 @@ fn people(export: &Export, chat: &Chat) -> Vec<(String, Option<String>)> {
         return vec![];
     }
     if !is_group(chat) {
-        return vec![(export.handle(chat.id, chat.name.as_deref()), chat.name.clone())];
+        return vec![(export.handle(chat.id), chat.name.clone())];
     }
     let mut seen = BTreeMap::new();
-    for m in &chat.messages {
-        if let (Some(id), name) = author(m)
+    for raw in &chat.messages {
+        let m = parse(raw);
+        if let (Some(id), name) = author(&m)
             && !export.is_owner(Some(id))
         {
-            seen.entry(export.handle(id, name)).or_insert_with(|| name.map(str::to_string));
+            seen.entry(export.handle(id)).or_insert_with(|| name.map(str::to_string));
         }
     }
     seen.into_iter().collect()
@@ -208,10 +209,11 @@ pub fn messages(export: &Export, filter: &Filter, out: &mut dyn FnMut(&MessageLi
 
 fn message(export: &Export, r: &ItemRef) -> MessageLine {
     let (chat, m) = export.message(r);
-    let (id, name) = author(m);
+    let m = &m;
+    let (id, _) = author(m);
     // Saved Messages are all the owner's; a one-to-one chat's notice with no author is neither's.
     let from_me = export.is_owner(id) || (is_saved(chat) && m.kind == "message");
-    let sender = if from_me { None } else { id.map(|id| export.handle(id, name)) };
+    let sender = if from_me { None } else { id.map(|id| export.handle(id)) };
     let guid = guid(chat.id, m.id);
     let mut line = MessageLine {
         kind: "message".into(),
@@ -317,18 +319,19 @@ fn reactions(export: &Export, m: &Message) -> Vec<Value> {
     for r in m.reactions.iter().flatten() {
         let Some(emoji) = r.get("emoji").and_then(Value::as_str) else { continue };
         let recent = r.get("recent").and_then(Value::as_array).cloned().unwrap_or_default();
-        if recent.is_empty() {
-            for _ in 0..r.get("count").and_then(Value::as_i64).unwrap_or(1) {
-                out.push(json!({ "type": "emoji", "emoji": emoji, "action": "added", "part": 0, "from": null, "is_from_me": false, "date": null }));
-            }
-        }
-        for who in recent {
+        // Telegram names only the latest few: the rest are one reaction with their count, never
+        // one each (a popular message's 20,000 thumbs up; audit M16).
+        let unnamed = r.get("count").and_then(Value::as_i64).unwrap_or(1).saturating_sub(recent.len() as i64);
+        for who in &recent {
             let id = user_id(who.get("from_id"));
             let me = export.is_owner(id);
-            let from = if me { None } else { id.map(|id| export.handle(id, who.get("from").and_then(Value::as_str))) };
+            let from = if me { None } else { id.map(|id| export.handle(id)) };
             let date = who.get("date").and_then(Value::as_str).and_then(|d| chrono::NaiveDateTime::parse_from_str(d, "%Y-%m-%dT%H:%M:%S").ok());
             let date = date.and_then(|d| d.and_local_timezone(Local).single()).map(|d| d.format("%Y-%m-%dT%H:%M:%S%:z").to_string());
             out.push(json!({ "type": "emoji", "emoji": emoji, "action": "added", "part": 0, "from": from, "is_from_me": me, "date": date }));
+        }
+        if unnamed > 0 {
+            out.push(json!({ "type": "emoji", "emoji": emoji, "action": "added", "part": 0, "from": null, "is_from_me": false, "date": null, "count": unnamed }));
         }
     }
     out

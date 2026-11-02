@@ -20,9 +20,15 @@ public struct TrashCan: Sendable {
         self.volumeRoot = volumeRoot
     }
 
-    /// `MAR_TRASH_DIR` (tests and debug runs: never the real Trash) else the real thing.
+    /// `MAR_TRASH_DIR` (tests and debug runs: never the real Trash) else the real thing. A
+    /// release build always uses the real thing.
     public static func standard(environment: [String: String] = ProcessInfo.processInfo.environment) -> TrashCan {
-        guard let dir = environment["MAR_TRASH_DIR"], !dir.isEmpty else { return TrashCan() }
+        #if DEBUG
+        let override = environment["MAR_TRASH_DIR"]
+        #else
+        let override: String? = nil
+        #endif
+        guard let dir = override, !dir.isEmpty else { return TrashCan() }
         let folder = URL(fileURLWithPath: dir)
         return TrashCan(macTrash: { url in
             let target = folder.appendingPathComponent(UUID().uuidString)
@@ -102,9 +108,58 @@ public struct FilePlacer: Sendable {
         self.trashed = trashed
     }
 
+    /// The new file is complete on disk, under a hidden name beside it, before the old one goes
+    /// to the Trash: a full disk leaves the old one where it was (audit 2026-11-01, H10).
     public func place(_ data: Data, at url: URL) throws {
-        try makeRoom(url)
-        try data.write(to: url, options: .withoutOverwriting)
+        let staged = Self.staging(url)
+        try? FileManager.default.removeItem(at: staged)
+        do {
+            try data.write(to: staged, options: .withoutOverwriting)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
+        try place(staged: staged, at: url)
+    }
+
+    /// `head`, the file `body` copied a piece at a time, and `tail`, put at `url` as `place`
+    /// does: a large conversation is never read into memory whole (audit M12).
+    public func place(head: Data, body: URL, tail: Data, at url: URL, piece: Int = 1 << 20) throws {
+        let staged = Self.staging(url)
+        try? FileManager.default.removeItem(at: staged)
+        do {
+            guard FileManager.default.createFile(atPath: staged.path, contents: head) else {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: staged.path])
+            }
+            let out = try FileHandle(forWritingTo: staged)
+            defer { try? out.close() }
+            try out.seekToEnd()
+            if let input = try? FileHandle(forReadingFrom: body) {
+                defer { try? input.close() }
+                while let chunk = try input.read(upToCount: piece), !chunk.isEmpty { try out.write(contentsOf: chunk) }
+            }
+            try out.write(contentsOf: tail)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
+        try place(staged: staged, at: url)
+    }
+
+    /// Puts a finished file, made beside its place, there: the old one to the Trash first.
+    public func place(staged: URL, at url: URL) throws {
+        do {
+            try makeRoom(url)
+            try FileManager.default.moveItem(at: staged, to: url)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
+    }
+
+    /// Where a file is made before it is put in place: hidden, beside it.
+    public static func staging(_ url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).placing")
     }
 
     public func makeRoom(_ url: URL) throws {

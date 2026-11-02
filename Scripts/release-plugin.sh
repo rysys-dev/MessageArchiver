@@ -6,7 +6,8 @@
 #   →  dist/plugins/<Name>-<version>.maplugin, with its size and SHA-256 for the site's button
 # plugin.json names the helper (`executable`) and the Cargo package that builds it
 # (`cargo_package`, in the engine/ workspace). Without the certificate it refuses: an ad hoc
-# signed plug-in would never install.
+# signed plug-in would never install. Built anywhere but the public repo (a test build), it
+# says it is not for sharing (audit W12).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,6 +42,13 @@ cp "${SRC}/plugin.json" "${SRC}/instructions.html" LICENSE "$STAGE/"
 codesign --force --options runtime --timestamp=none --sign "$SIGN_ID" \
     --identifier "com.rysys.MessageArchiver.plugin.${ID}" "${STAGE}/${EXE}"
 codesign --verify --strict -R="certificate leaf = H\"${PINNED}\"" "${STAGE}/${EXE}"
+# Its description and the page it shows are signed too, so neither can be swapped: the app
+# installs a plug-in only when all three check out (audit M9). The signature travels in each
+# file's extended attributes, which ditto keeps in the zip.
+for file in plugin.json instructions.html; do
+    codesign --force --timestamp=none --sign "$SIGN_ID" --identifier "com.rysys.MessageArchiver.plugin.${ID}.${file%%.*}" "${STAGE}/${file}"
+    codesign --verify --strict -R="certificate leaf = H\"${PINNED}\"" "${STAGE}/${file}"
+done
 
 # Nothing from the build machine in what is shared: no home folder, no user name.
 if strings -a "${STAGE}/${EXE}" | grep -qiE "${HOME}|/Users/$(id -un)"; then
@@ -55,3 +63,10 @@ ditto -c -k --keepParent "$STAGE" "$OUT"
 echo "plug-in: ${OUT}"
 echo "size:    $(stat -f %z "$OUT") bytes"
 echo "sha256:  $(shasum -a 256 "$OUT" | cut -d' ' -f1)"
+case "$(git remote get-url origin 2>/dev/null || true)" in
+    *github.com/rysys-dev/MessageArchiver|*github.com/rysys-dev/MessageArchiver.git|*github.com:rysys-dev/MessageArchiver.git)
+        [ -n "$(git status --porcelain)" ] && echo "uncommitted changes: not for sharing until built from a commit." >&2
+        [ -z "$(git branch -r --contains HEAD 2>/dev/null)" ] && echo "not pushed yet: push this commit before the plug-in is shared." >&2 ;;
+    *) echo "a test build: not from the public repo, not for sharing." >&2 ;;
+esac
+true

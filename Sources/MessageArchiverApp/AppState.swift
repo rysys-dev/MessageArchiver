@@ -29,6 +29,8 @@ final class AppState {
     // MARK: What was read
 
     private(set) var isReading = false
+    /// Counts source switches, so a read that began before one is recognised and dropped.
+    private var sourceChanges = 0
     private(set) var isReadingSummary = false
     private(set) var readingStage = ""
     private(set) var readError: String?
@@ -95,7 +97,10 @@ final class AppState {
     private(set) var contentMatches: [ThreadRef: Int] = [:]
     private var contentTask: Task<Void, Never>?
     var destination: URL {
-        didSet { save() }
+        didSet {
+            save()
+            refreshFreeSpace()
+        }
     }
     var exportOptions = ExportOptions() {
         didSet { save() }
@@ -161,6 +166,7 @@ final class AppState {
         overrides = IdentityStore.load()
         liveIndexInfo = LiveIndex.info()
         loading = false
+        refreshFreeSpace()
         checkPermissions()
         Task { await discoverSources() }
         // Contacts is read afresh on every read; this also catches a contact added or edited
@@ -236,8 +242,12 @@ final class AppState {
         guard let engine, diagnostics == nil, !isReadingSummary, fullDiskAccess == .granted else { return }
         isReadingSummary = true
         defer { isReadingSummary = false }
+        let reading = sourceChanges
         do {
-            diagnostics = try await engine.diagnostics(source: source)
+            let d = try await engine.diagnostics(source: source)
+            // The source changed while it was read: another source's totals (W8).
+            guard reading == sourceChanges else { return }
+            diagnostics = d
         } catch let error as EngineError where error.isPermissionDenied {
             checkPermissions()
             readError = error.message
@@ -252,6 +262,7 @@ final class AppState {
         isReading = true
         readError = nil
         defer { isReading = false }
+        let reading = sourceChanges
         do {
             readingStage = "Reading totals…"
             let d = try await engine.diagnostics(source: source)
@@ -264,6 +275,8 @@ final class AppState {
             let others = await o
             readingStage = "Reading Contacts…"
             let cards = await contactCards()
+            // The source changed while it was read: what was read is the old source's.
+            guard reading == sourceChanges else { return }
             let firstRead = self.threads.isEmpty
             self.diagnostics = d
             self.otherDiagnostics = others.diagnostics
@@ -377,6 +390,8 @@ final class AppState {
                                             messages: { self.countsOfThread[$0]?.messages ?? 0 })
         conversationOf = Conversations.index(conversations)
         threadInfo = Dictionary(threads.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
+        topPeople = Array(people.sorted { messageCount(of: $0) > messageCount(of: $1) }.prefix(5))
+        topThreads = Array(threads.sorted { self.messages(in: $0) > self.messages(in: $1) }.prefix(5))
         updateShown()
     }
 
@@ -468,10 +483,14 @@ final class AppState {
         indexError = nil
         indexProgress = (0, 0)
         defer { isIndexing = false }
+        let reading = sourceChanges
         do {
             liveIndexInfo = try await LiveIndex.refresh(engine: engine, source: source == AppPaths.messagesDatabase ? nil : source) { done, total in
                 Task { @MainActor in self.indexProgress = (done, total) }
             }
+            // Switched to a backup meanwhile: the Mac's index would match its conversations by
+            // number (W7). It is kept for when the Mac is read again.
+            guard reading == sourceChanges, backup == nil else { return }
             liveSearch = try? ArchiveSearch(url: LiveIndex.url, root: AppPaths.support)
             updateContentMatches()
         } catch {
@@ -575,17 +594,25 @@ final class AppState {
         search = person.displayName
     }
 
-    var topPeople: [Person] {
-        Array(people.sorted { messageCount(of: $0) > messageCount(of: $1) }.prefix(5))
-    }
-
-    var topThreads: [ThreadInfo] {
-        Array(threads.sorted { messages(in: $0) > messages(in: $1) }.prefix(5))
-    }
+    /// The dashboard's top fives, worked out when the counts change, not on every redraw
+    /// (audit M18).
+    private(set) var topPeople: [Person] = []
+    private(set) var topThreads: [ThreadInfo] = []
 
     var namedPeople: Int { people.count { $0.name != nil } }
 
-    var freeSpace: Int64? { FreeSpace.available(at: destination) }
+    /// Free space where the archive goes. Asked off the main thread when the destination
+    /// changes and after an export, never on a redraw: a sleeping NAS takes seconds to answer
+    /// (audit M18).
+    private(set) var freeSpace: Int64?
+
+    func refreshFreeSpace() {
+        let url = destination
+        Task.detached {
+            let free = FreeSpace.available(at: url)
+            await MainActor.run { if self.destination == url { self.freeSpace = free } }
+        }
+    }
 
     func chooseDestination() {
         let panel = NSOpenPanel()
@@ -668,6 +695,7 @@ final class AppState {
             } catch {
                 exportError = error.localizedDescription
             }
+            refreshFreeSpace()
             exportTask = nil
             phase = .done
             if quitWhenStopped { NSApp.reply(toApplicationShouldTerminate: true) }
@@ -812,15 +840,27 @@ final class AppState {
         if panel.runModal() == .OK, let url = panel.url { verify(url) }
     }
 
+    private var verifyTask: Task<Void, Never>?
+    private var verifications = 0
+
+    /// One check at a time: a new one cancels the last, and a late answer from it (its report,
+    /// or progress landing out of order) is dropped (audit L4).
     func verify(_ root: URL) {
+        verifyTask?.cancel()
+        verifications += 1
+        let run = verifications
         verifyTarget = root
         verifyReport = nil
         verifyProgress = (0, 0)
-        Task {
+        verifyTask = Task {
             let report = await ArchiveVerifier.verify(root) { done, total in
-                Task { @MainActor in self.verifyProgress = (done, total) }
+                Task { @MainActor in
+                    if self.verifications == run, done > self.verifyProgress.done { self.verifyProgress = (done, total) }
+                }
             }
+            guard verifications == run, !Task.isCancelled else { return }
             verifyReport = report
+            verifyTask = nil
         }
     }
 
@@ -952,8 +992,15 @@ final class AppState {
                              status: .failed(p.problem ?? ""))
         }
         let engines = [Engine.bundled()].compactMap { $0 } + PluginStore.engines(plugins) + Engine.extras()
+        // A later discovery (a plug-in installed meanwhile) replaces this one's findings; this
+        // one's, arriving late, are dropped.
+        discoveries += 1
+        let this = discoveries
         isDiscovering = true
-        await SourceRegistry.discover(engines, chosen: exportFolders) { found in await MainActor.run { self.sources = found + rejected } }
+        await SourceRegistry.discover(engines, chosen: exportFolders) { found in
+            await MainActor.run { if this == self.discoveries { self.sources = found + rejected } }
+        }
+        guard this == discoveries else { return }
         isDiscovering = false
         await refreshBackupFinds()
         // A source found after the dashboard was read joins it.
@@ -961,6 +1008,7 @@ final class AppState {
     }
 
     private(set) var isDiscovering = false
+    private var discoveries = 0
 
     // MARK: Exports (Milestone 20)
 
@@ -1008,10 +1056,21 @@ final class AppState {
     }
 
     private func reintroduce(_ source: RegisteredSource) async {
-        guard let i = sources.firstIndex(where: { $0.engine.executable == source.engine.executable }) else { return }
-        // The source's own engine, so a plug-in stays sandboxed and keeps its time limits.
-        sources[i] = await SourceRegistry.introduce(sources[i].engine, chosen: exportFolders)
+        guard await introduceAgain(source.engine.executable) != nil else { return }
         if phase == .dashboard { await readMessages() }
+    }
+
+    /// Introduces one listed engine again and puts what it says in its place, found again by
+    /// its executable after the wait: the list can change meanwhile (discovery, a plug-in
+    /// installed or removed), so a position taken before it may be gone or another source's
+    /// (audit 2026-11-01, H6). Nil when it is no longer listed.
+    private func introduceAgain(_ executable: URL) async -> RegisteredSource? {
+        guard let listed = sources.first(where: { $0.engine.executable == executable }) else { return nil }
+        // The source's own engine, so a plug-in stays sandboxed and keeps its time limits.
+        let introduced = await SourceRegistry.introduce(listed.engine, chosen: exportFolders)
+        guard let i = sources.firstIndex(where: { $0.engine.executable == executable }) else { return nil }
+        sources[i] = introduced
+        return introduced
     }
 
     /// The plug-ins folder's contents, checked (Milestone 17).
@@ -1022,6 +1081,12 @@ final class AppState {
 
     /// Installs a `.maplugin` the user chose or opened in Finder, after saying what it is.
     func installPlugin(_ archive: URL) {
+        // An installed plug-in replaced mid-export would go to the Trash while its engine is
+        // still being read (audit M2).
+        guard !isExporting else {
+            inform("Plug-ins can’t be installed during an export", "Install it once the export has finished.")
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Install the plug-in “\(archive.deletingPathExtension().lastPathComponent)”?"
         alert.informativeText = "A plug-in reads another service’s messages for MessageArchiver. It is installed only if RYSYS signed it and nobody changed it since; it runs with no network, and can’t change what it reads."
@@ -1048,6 +1113,10 @@ final class AppState {
 
     /// To the Trash; what it read stays in your archives.
     func removePlugin(_ plugin: InstalledPlugin) {
+        guard !isExporting else {
+            inform("Plug-ins can’t be removed during an export", "Remove \(plugin.name) once the export has finished.")
+            return
+        }
         do {
             try PluginStore.remove(plugin)
             if let id = plugin.manifest?.id { leftOut.remove(id) }
@@ -1083,10 +1152,9 @@ final class AppState {
             await discoverSources()
             return
         }
-        guard let i = sources.firstIndex(where: { $0.engine.executable == failed.engine.executable }) else { return }
         // Its own engine, so a plug-in stays sandboxed (a fresh Engine isn't).
-        sources[i] = await SourceRegistry.introduce(sources[i].engine, chosen: exportFolders)
-        if phase == .dashboard, sources[i].status == .ready { await readMessages() }
+        guard let introduced = await introduceAgain(failed.engine.executable) else { return }
+        if phase == .dashboard, introduced.status == .ready { await readMessages() }
     }
 
     /// Every other source that can be read, with what it reads: from the iPhone backup being
@@ -1203,10 +1271,13 @@ final class AppState {
     }
 
     private func switchSource(to url: URL, backup chosen: IOSBackup?, key: String?) async {
+        // Everything read from the old source goes first, before any wait: an export started
+        // meanwhile would pair the new source's engine with the old one's conversation numbers
+        // and names (audit 2026-11-01, H11). A read of the old source still running is dropped.
+        sourceChanges += 1
         source = url
         backup = chosen
         engine = Engine.bundled()?.unlocked(with: key)
-        await refreshBackupFinds()
         diagnostics = nil
         threads = []
         handles = []
@@ -1218,6 +1289,7 @@ final class AppState {
         liveSearch = nil
         contentMatches = [:]
         updateShown()
+        await refreshBackupFinds()
         fullDiskAccess = FullDiskAccess.status(of: permissionTarget)
         if phase == .dashboard {
             await readMessages()

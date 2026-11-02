@@ -3,8 +3,9 @@
 # signed with "RYSYS Local Code Signing" (decision 2026-10-18: no Developer ID; friends approve
 # it once in System Settings), zipped so the bundle and its signature survive.
 #   ./Scripts/release.sh   →  dist/MessageArchiver-<version>-macos.zip
-# It refuses to package without the public source link (GPL-3.0, decision Q4) or from a tree
-# with uncommitted changes (the build code must name a commit anyone can fetch).
+# It refuses to package without the public source link (GPL-3.0, decision Q4), outside the
+# public repo, or from a tree with uncommitted changes (the build code must name a commit
+# anyone can fetch), and without the RYSYS signature (audit W11, W12).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,6 +16,11 @@ if grep -q 'sourceURL: URL? = nil' Sources/MessageArchiverCore/Version.swift; th
     echo "AppVersion.sourceURL isn't set: the GPL needs the public source link before the app is given to anyone." >&2
     exit 1
 fi
+case "$(git remote get-url origin 2>/dev/null || true)" in
+    *github.com/rysys-dev/MessageArchiver|*github.com/rysys-dev/MessageArchiver.git|*github.com:rysys-dev/MessageArchiver.git) ;;
+    *) echo "not the public repo (origin isn't rysys-dev/MessageArchiver): release from the public folder, so the build code names a published commit." >&2
+       exit 1 ;;
+esac
 if [ -n "$(git status --porcelain)" ]; then
     echo "uncommitted changes: commit first, so the build code names a published commit." >&2
     exit 1
@@ -22,7 +28,16 @@ fi
 
 ./Scripts/install.sh
 APP="${REPO}/build/MessageArchiver.app"
+# Signed with the RYSYS certificate, not ad hoc: install.sh falls back to ad hoc signing when
+# the keychain is locked, and an ad hoc update costs friends their Full Disk Access.
+PINNED="$(sed -n 's/.*rysysCertificate = "\(.*\)".*/\1/p' Sources/MessageArchiverCore/Plugins.swift)"
 codesign --verify --strict --deep "$APP"
+for code in "$APP" "${APP}/Contents/Helpers/ma-engine"; do
+    codesign --verify --strict -R="certificate leaf = H\"${PINNED}\"" "$code" || {
+        echo "$(basename "$code") isn't signed with RYSYS Local Code Signing (${PINNED}): unlock the keychain and run again." >&2
+        exit 1
+    }
+done
 
 # Nothing from the build machine in what friends get: no home folder, no user name.
 for bin in "${APP}/Contents/MacOS/MessageArchiver" "${APP}/Contents/Helpers/ma-engine"; do
@@ -46,3 +61,6 @@ echo
 echo "packaged: ${ZIP} ($(du -h "$ZIP" | cut -f1))"
 echo "sha256:   $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 echo "commit:   $(git rev-parse --short HEAD) — tag it: git tag v${VERSION}"
+if [ -z "$(git branch -r --contains HEAD 2>/dev/null)" ]; then
+    echo "not pushed yet: push this commit before the zip is shared (its build code names it)." >&2
+fi

@@ -63,6 +63,9 @@ struct TranscriptEntry: Codable, Sendable, Equatable {
     var replyTo: String?
     var exhibits: [Exhibit]
     var annotations: [String]
+    /// The source's own description of the message (`ExportMessage.note`), not its text: shown
+    /// bracketed, in italics.
+    var note: String? = nil
 }
 
 /// What a cover page states about where and how the export was made (spec §9.4).

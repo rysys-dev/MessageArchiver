@@ -3,6 +3,8 @@ import Foundation
 /// One format's files, one per conversation, written as messages stream in.
 protocol FormatWriter: AnyObject {
     var format: ExportFormat { get }
+    /// Each conversation's part file, written as messages stream in.
+    var files: ThreadFiles { get }
     /// The conversation's file, relative to the archive.
     func path(of thread: ExportThread) -> String
     func write(_ m: ExportMessage, raw: [String: Any]?, thread: ExportThread, attachments: [RenderedAttachment], reply: QuotedReply?)
@@ -23,6 +25,9 @@ final class ThreadFiles {
     private var pendingBytes = 0
     private var threads: [ThreadRef: ExportThread] = [:]
     private(set) var started: [ThreadRef] = []
+    /// Conversations whose part file this run has begun: the first write replaces whatever a
+    /// run that never finished left (audit 2026-11-01, H9).
+    private var begun: Set<ThreadRef> = []
 
     init(root: URL, folder: String, name: @escaping (ExportThread) -> String,
          head: @escaping (ExportThread) -> String = { _ in "" }, problem: @escaping (String) -> Void) throws {
@@ -32,6 +37,25 @@ final class ThreadFiles {
         self.head = head
         self.problem = problem
         try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+        Self.removeLeftovers(in: root.appendingPathComponent(folder))
+    }
+
+    /// A run that crashed or was force-quit leaves its hidden part files: this app's own scratch,
+    /// never a page, so they are removed rather than finished or appended to.
+    static func removeLeftovers(in folder: URL) {
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
+        where name.hasPrefix(".") && [".part", ".placing", ".partial"].contains(where: name.hasSuffix) {
+            try? fm.removeItem(at: folder.appendingPathComponent(name))
+        }
+    }
+
+    /// A conversation's part file, whose parts are dropped (an update that keeps it as it was).
+    func discard(_ id: ThreadRef) {
+        guard let thread = threads[id] else { return }
+        pendingBytes -= pending[id]?.utf8.count ?? 0
+        pending[id] = nil
+        try? FileManager.default.removeItem(at: url(thread))
     }
 
     func url(_ thread: ExportThread) -> URL {
@@ -58,6 +82,7 @@ final class ThreadFiles {
     func flush(_ only: ThreadRef? = nil) {
         for (id, text) in pending where only == nil || id == only {
             guard let thread = threads[id] else { continue }
+            if begun.insert(id).inserted { FileManager.default.createFile(atPath: url(thread).path, contents: nil) }
             Self.append(Data(text.utf8), to: url(thread), problem: problem)
             pendingBytes -= text.utf8.count
             pending[id] = nil
@@ -124,13 +149,12 @@ final class HTMLWriter: FormatWriter {
         files.flush()
         for thread in threads where files.hasStarted(thread.id) {
             let part = files.url(thread)
-            let body = (try? Data(contentsOf: part)) ?? Data()
             let header = renderer.header(title: thread.title, participants: thread.participants.map { ($0.name, $0.handle) },
                                          sources: (thread.parts.isEmpty ? [thread.id] : thread.parts).sources,
                                          stats: stats[thread.id] ?? ThreadStats(), exported: exported)
             let head = style.pageHead(title: thread.title, stylesheet: "style.css", header: header)
             let target = files.root.appendingPathComponent("Conversations").appendingPathComponent(finalName(thread))
-            try placer.place(Data(head.utf8) + body + Data(style.pageFoot(footer: footer).utf8), at: target)
+            try placer.place(head: Data(head.utf8), body: part, tail: Data(style.pageFoot(footer: footer).utf8), at: target)
             try? FileManager.default.removeItem(at: part)
         }
     }
@@ -188,13 +212,18 @@ final class MarkdownWriter: FormatWriter {
             return "*\(renderer.announcementText(m))* (\(time(m)))\n"
         }
         var line = "**\(renderer.senderName(m))** (\(time(m))):"
+        // The source's own words, in italics: not something said.
+        if let note = m.note { line += " *\(note)*" }
         if let text = m.text {
             line += " " + text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "  \n  ")
         }
-        if m.edited?.isEdited == true { line += " *(edited)*" }
-        if m.unsent { line += " *(unsent)*" }
-        if m.recovered { line += " *(recovered – deleted message)*" }
+        // Status labels as the transcript has them (text-styles.md, style 4).
+        if m.edited?.isEdited == true { line += " **[EDITED]**" }
+        if m.unsent { line += " **[UNSENT]**" }
+        if m.recovered { line += " **[RECOVERED – deleted message]**" }
+        // What was said or sent stays plain; what is about the message is in italics (style 2).
         var items: [String] = []
+        var about: [String] = []
         if let reply { items.append("↩ in reply to \(reply.sender): “\(reply.snippet)”") }
         for a in attachments {
             if a.kind == .missing || a.primary == nil {
@@ -207,20 +236,21 @@ final class MarkdownWriter: FormatWriter {
             if app.type == "url_preview", let url = app.data?["url"]?.string {
                 items.append("🔗 [\(app.data?["title"]?.string ?? url)](<\(url)>)")
             } else if app.type != "url_preview" {
-                items.append("[\(ConversationRenderer.appNames[app.type] ?? "App message")]")
+                about.append("[\(ConversationRenderer.appNames[app.type] ?? "App message")]")
             }
         }
         for part in m.edited?.parts ?? [] where part.status == "edited" {
             let earlier = part.history.dropLast().map { "“\($0.text)”" }.joined(separator: ", ")
-            if !earlier.isEmpty { items.append("earlier: \(earlier)") }
+            if !earlier.isEmpty { about.append("earlier: \(earlier)") }
         }
-        if let e = m.expressive { items.append("sent with \(ConversationRenderer.expressiveNames[e] ?? e)") }
+        if let e = m.expressive { about.append("sent with \(ConversationRenderer.expressiveNames[e] ?? e)") }
         for t in m.tapbacks {
-            let who = t.isFromMe ? renderer.me : (t.from.map { renderer.names[$0] ?? $0 } ?? "Unknown")
+            let who = t.isFromMe ? renderer.me : (t.from.map { renderer.names[$0] ?? $0 } ?? t.unnamed)
             var label = ConversationRenderer.tapbackNames[t.type] ?? t.type
             if t.type == "emoji", let e = t.emoji { label = "Reacted \(e)" }
-            items.append(t.action == "removed" ? "\(label) by \(who) (removed)" : "\(label) by \(who)")
+            about.append(t.action == "removed" ? "\(label) by \(who) (removed)" : "\(label) by \(who)")
         }
+        items += about.map { "*\($0)*" }
         return line + "\n" + items.map { "  - \($0)\n" }.joined()
     }
 
@@ -230,10 +260,9 @@ final class MarkdownWriter: FormatWriter {
         files.flush()
         for thread in threads where files.hasStarted(thread.id) {
             let part = files.url(thread)
-            let body = (try? Data(contentsOf: part)) ?? Data()
             let s = stats[thread.id] ?? ThreadStats()
             let target = files.root.appendingPathComponent("Markdown").appendingPathComponent(finalName(thread))
-            try placer.place(Self.bom + Data(frontMatter(thread, s).utf8) + body, at: target)
+            try placer.place(head: Self.bom + Data(frontMatter(thread, s).utf8), body: part, tail: Data(), at: target)
             try? FileManager.default.removeItem(at: part)
         }
     }
@@ -368,8 +397,7 @@ final class JSONWriter: FormatWriter {
             let s = stats[thread.id] ?? ThreadStats()
             let tail = "\n  ],\n  \"message_count\": \(s.messages),\n  \"attachment_count\": \(s.attachments),\n  \"date_range\": \(Self.encode([orNull(s.first), orNull(s.last)] as [Any]))\n}\n"
             let part = files.url(thread)
-            let body = (try? Data(contentsOf: part)) ?? Data()
-            try placer.place(body + Data(tail.utf8), at: files.root.appendingPathComponent(path(of: thread)))
+            try placer.place(head: Data(), body: part, tail: Data(tail.utf8), at: files.root.appendingPathComponent(path(of: thread)))
             try? FileManager.default.removeItem(at: part)
         }
     }

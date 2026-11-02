@@ -34,12 +34,14 @@ public struct Style: Sendable, Equatable {
         }
     }
 
-    /// `MAR_STYLES_DIR`; else `Contents/Resources/Styles` in the app; else the repo's `Styles/`
-    /// (tests and debug builds).
+    /// `MAR_STYLES_DIR` (debug builds); else `Contents/Resources/Styles` in the app; else the
+    /// repo's `Styles/` (tests and debug builds).
     public static var directory: URL? {
+        #if DEBUG
         if let override = ProcessInfo.processInfo.environment["MAR_STYLES_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
+        #endif
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Styles"),
            FileManager.default.fileExists(atPath: bundled.path) {
             return bundled
@@ -97,7 +99,9 @@ enum HTML {
     /// A relative path for `href` and `src`: each component percent-encoded, slashes kept.
     static func path(_ relative: String) -> String {
         relative.split(separator: "/", omittingEmptySubsequences: false)
-            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? String($0) }
+            // `'` and `&` too: a path goes inside an HTML attribute, and into a script's quoted
+            // string in an image's fallback (audit L10).
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#'&"))) ?? String($0) }
             .joined(separator: "/")
     }
 }

@@ -209,6 +209,9 @@ public struct ExportResult: Sendable {
     /// Sources that couldn't be read (Milestone 16): "Sample: it stopped unexpectedly". Their
     /// conversations are written, and marked incomplete.
     public var failedSources: [String] = []
+    /// Messages an update kept from the archive because their sources no longer hold them
+    /// (audit H7): Messages keeping only a year, a message deleted on the phone.
+    public var keptFromArchive = 0
 }
 
 /// "1 message", "2 messages", with the number formatted for the user's locale.

@@ -1,7 +1,7 @@
 {
   "id": "whatsapp",
   "name": "WhatsApp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "protocol": 2,
   "minimum_app": "1.1.0",
   "executable": "ma-whatsapp",

@@ -41,8 +41,8 @@ public enum ArchiveManifest {
     public static let sumsName = "SHA256SUMS.txt"
 
     /// Files the manifest describes: everything in the archive except the two integrity files
-    /// themselves, the archive's own state folder (`.messagearchiver/`, Milestone 9) and
-    /// Finder's `.DS_Store`. Relative paths, sorted.
+    /// themselves, the archive's own state folder (`.messagearchiver/`, Milestone 9), a
+    /// `RYSYS Trash` folder in it, and Finder's `.DS_Store`. Relative paths, sorted.
     public static func files(in root: URL) -> [String] {
         let fm = FileManager.default
         guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey]) else { return [] }
@@ -52,24 +52,44 @@ public enum ArchiveManifest {
             let full = url.standardizedFileURL.resolvingSymlinksInPath().path
             guard full.hasPrefix(base) else { continue }
             let rel = String(full.dropFirst(base.count))
-            if rel == ".messagearchiver" || rel.hasPrefix(".messagearchiver/") {
+            // `RYSYS Trash` lands in the archive on a drive with no Trash where nothing above
+            // the archive is writable: what was replaced, not part of the archive (audit L11).
+            if rel == ".messagearchiver" || rel.hasPrefix(".messagearchiver/") || rel == "RYSYS Trash" {
                 walker.skipDescendants()
                 continue
             }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
             if rel == manifestName || rel == sumsName || url.lastPathComponent == ".DS_Store" { continue }
+            // A file being written (a hidden `.….part`, `.placing` or `.partial`) isn't part of it.
+            let name = url.lastPathComponent
+            if name.hasPrefix("."), [".part", ".placing", ".partial"].contains(where: name.hasSuffix) { continue }
             out.append(rel)
         }
         return out.sorted { $0.compare($1, options: .literal) == .orderedAscending }
     }
 
-    /// Hashes every file and writes `manifest.json` and `SHA256SUMS.txt` (never over existing
-    /// ones; Milestone 9 will replace them deliberately).
+    /// Hashes every file and writes `manifest.json` and `SHA256SUMS.txt`: never over existing
+    /// ones, unless `placer` is given (an update), which sends them to the Trash only once the
+    /// new ones are written.
     @discardableResult
     public static func write(root: URL, archive: String, source: URL, sourceSHA256: String?,
-                             created: Date = .now, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> Manifest {
+                             created: Date = .now, placer: FilePlacer? = nil,
+                             progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> Manifest {
+        try await write(root: root, archive: archive, source: source, sourceSHA256: sourceSHA256, created: created, placer: placer,
+                        cache: nil, progress: progress)
+    }
+
+    /// With `cache`, a file unchanged since it was last hashed isn't read again (audit M11).
+    static func write(root: URL, archive: String, source: URL, sourceSHA256: String?, created: Date = .now,
+                      placer: FilePlacer? = nil, cache: HashCache?,
+                      progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> Manifest {
         let paths = files(in: root)
-        let hashes = await FileHash.sha256(paths.map { root.appendingPathComponent($0) }, progress: progress)
+        let urls = paths.map { root.appendingPathComponent($0) }
+        let hashes = if let cache {
+            await cache.sha256(urls, root: root, progress: progress)
+        } else {
+            await FileHash.sha256(urls, progress: progress)
+        }
         var entries: [Manifest.Entry] = []
         var total: Int64 = 0
         for path in paths {
@@ -91,8 +111,13 @@ public enum ArchiveManifest {
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let json = JSONWriter.ascii(String(decoding: try encoder.encode(manifest), as: UTF8.self)) + "\n"
-        try Data(json.utf8).write(to: root.appendingPathComponent(manifestName), options: .withoutOverwriting)
-        try Data(sums(entries).utf8).write(to: root.appendingPathComponent(sumsName), options: .withoutOverwriting)
+        for (data, name) in [(Data(json.utf8), manifestName), (Data(sums(entries).utf8), sumsName)] {
+            if let placer {
+                try placer.place(data, at: root.appendingPathComponent(name))
+            } else {
+                try data.write(to: root.appendingPathComponent(name), options: .withoutOverwriting)
+            }
+        }
         return manifest
     }
 

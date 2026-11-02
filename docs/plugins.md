@@ -11,9 +11,9 @@ A zip of one folder, named for the plug-in's id:
 
 ```
 whatsapp/
-  plugin.json              who it is (below)
+  plugin.json              who it is (below), signed by RYSYS
   ma-whatsapp              the program, signed by RYSYS
-  instructions.html        how to bring this service's messages in, shown from the app
+  instructions.html        how to bring this service's messages in, shown from the app; signed
   LICENSE                  GPL-3.0
   THIRD-PARTY-NOTICES.txt  every crate compiled into it
 ```
@@ -38,7 +38,10 @@ Finder. The app unzips it into a hidden folder in its plug-ins folder
 2. its protocol is the app's, and the app is at least `minimum_app`;
 3. **the program's signature is whole and made with the RYSYS Local Code Signing certificate**
    (`PluginTrust`): the certificate's SHA-1 is built into the app, so there is no Developer ID or
-   Team ID involved.
+   Team ID involved;
+4. **so are `plugin.json`'s and `instructions.html`'s** (since 1.3.0, audit M9): `codesign` signs a
+   file that isn't a program in its extended attributes, which `ditto` keeps in the zip. A
+   plug-in packaged before then (1.0's) isn't installed: the current one from apps.rysys.net is.
 
 Only then does the download's quarantine flag come off that copy, and it moves into
 `Plugins/<id>/`; a plug-in already there goes to the Trash. Anything that fails a check is
@@ -52,11 +55,20 @@ Remove sends a plug-in's folder to the Trash. Archives already made keep what it
 Each in its own process, under the time limits of protocol 2, and **in a sandbox**
 (`sandbox-exec`, `Engine.sandboxed`): no network at all, and no writes anywhere but a temporary
 folder of its own (its `TMPDIR`, removed afterwards) and the folder an export names with
-`--extract-to`. It reads what it needs, read-only, as Messages' own engine does; macOS still
+`--extract-to`. Nor can it start any other program, send Apple Events, or reach Launch
+Services or the pasteboard, so nothing leaves through the browser or the clipboard either
+(audit M1; a debug build also lets the shells start, for the tests' script engines). It
+reads what it needs, read-only, as Messages' own engine does; macOS still
 asks for Full Disk Access as it does for MessageArchiver.
 
 A plug-in that fails, hangs or misbehaves shows a notice for its source alone (Milestone 15);
 everything else carries on.
+
+## Writing what isn't the message
+
+A plug-in's own description of a message ("Shared an album", "A message with no text") goes in
+the message's `note` (`engine-protocol.md`), never in `text`: the app shows notes apart from
+what was said ([`text-styles.md`](text-styles.md)).
 
 ## Making one: `Scripts/release-plugin.sh <folder>`
 
@@ -115,9 +127,12 @@ The test plug-in `engine/fixtures/plugin` (Sample) packages the same way and is 
   `edited_unixtime`, `action` codes with `actor`, `title`, `members`). Telegram's ids stay the
   same between exports: a thread is the chat's id, a guid `tg-<chat>-<message>`, a rowid the
   message's time (s × 1000, plus three digits from its guid). Phone numbers are only in
-  `contacts.list`: a person whose name matches exactly one contact gets that number, anyone else
-  is `user<id>`, named from the export. A group's participants are those who wrote in it (the
+  `contacts.list`, which has no user ids: a person whose one-to-one chat's name matches exactly
+  one contact gets that number (the chat's id is theirs), anyone else is `user<id>`, named from
+  the export. A group member is never matched by name alone: it may be a stranger (audit W9). A group's participants are those who wrote in it (the
   export has no member list). Channels are left out. An edited message is
   `{"is_edited": true, "parts": []}`: marked, with no versions (Telegram keeps only the last).
-  `result.json` is read whole (it is one JSON document), into typed records with only the
-  fields used. Its tests build made-up exports of both layouts.
+  `result.json` is one JSON document, read in one pass: each message is kept as its own text
+  (about the file's size in memory) and read in full only when it is used. Groups the owner
+  left (Desktop's `left_chats`) are read too; a field written as `null` counts as empty. Its
+  tests build made-up exports of both layouts.

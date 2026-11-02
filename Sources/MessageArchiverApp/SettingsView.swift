@@ -176,6 +176,7 @@ private struct SourcesSection: View {
                     Button("Instructions") { state.openInstructions(plugin) }
                         .disabled(!FileManager.default.fileExists(atPath: plugin.instructions.path))
                     Button("Remove…") { removing = plugin }
+                        .disabled(state.isExporting)
                 }
             }
         }
@@ -189,6 +190,7 @@ private struct SourcesSection: View {
             Spacer()
             Button("Plug-ins Page") { state.openPluginsPage() }
             Button("Install Plug-in…") { state.chooseAndInstallPlugin() }
+                .disabled(state.isExporting)
         }
         .confirmationDialog("Remove \(removing?.name ?? "the plug-in")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Move to Trash", role: .destructive) {

@@ -16,7 +16,7 @@ use std::{
     fmt,
     fs,
     io::{self, ErrorKind},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use rusqlite::{Connection, OpenFlags};
@@ -151,12 +151,16 @@ impl Store {
     fn open_backup(root: &Path, extract_to: Option<PathBuf>) -> Result<Self, Error> {
         ma_backup::check_finished(root)?;
         let scratch = Scratch::new()?;
-        let (unlocked, kept) = if ma_backup::is_encrypted(root)? {
+        // `kept` before `unlocked`, so on an error below the backup closes before its folder
+        // goes (locals drop last first; audit L5).
+        let mut kept = None;
+        let unlocked = if ma_backup::is_encrypted(root)? {
             let secret = ma_backup::Secret::read().ok_or_else(ma_backup::password_needed)?;
-            let (backup, kept) = ma_backup::unlock(root, &secret)?;
-            (Some(backup), Some(kept))
+            let (backup, folder) = ma_backup::unlock(root, &secret)?;
+            kept = Some(folder);
+            Some(backup)
         } else {
-            (None, None)
+            None
         };
         let fetch = |name: &str| -> Result<Option<Connection>, Error> {
             let id = ma_backup::file_id(DOMAIN, name);
@@ -196,8 +200,11 @@ impl Store {
         Ok(store)
     }
 
-    /// One media file, from `ZMEDIALOCALPATH`.
+    /// One media file, from `ZMEDIALOCALPATH`: a relative path, never out of the media folder.
     pub fn media_file(&self, relative: &str) -> MediaFile {
+        if !Path::new(relative).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+            return MediaFile { path: None, size: None, missing: true };
+        }
         match &self.media {
             Media::Folder(root) => {
                 let p = root.join(relative);
@@ -218,7 +225,7 @@ impl Store {
                 let Some(dir) = extract_to else { return MediaFile { path: None, size: None, missing: false } };
                 let ext = Path::new(relative).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
                 let target = dir.join(format!("{id}{ext}"));
-                if !target.exists() && ma_backup::decrypt_to(backup, &id, &target).is_err() {
+                if ma_backup::decrypt_to(backup, &id, &target).is_err() {
                     return MediaFile { path: None, size: None, missing: false };
                 }
                 let size = fs::metadata(&target).ok().map(|m| m.len() as i64);
@@ -361,21 +368,44 @@ impl Scratch {
         Ok(Scratch(dir))
     }
 
-    /// Copies `name` (with its `-wal` and `-shm`) here and opens the copy; None when the
-    /// container has no such database.
+    /// Copies `name` and its `-wal` here and opens the copy; None when the container has no
+    /// such database. WhatsApp may write while it's copied: when either file changed during
+    /// the copy, it is copied again, and the copy must pass SQLite's own check (audit M8).
+    /// `-shm` isn't copied: SQLite rebuilds it from the `-wal`.
     fn open_copy(&self, container: &Path, name: &str) -> Result<Option<Connection>, Error> {
-        let source = container.join(name);
-        if !source.exists() {
+        if !container.join(name).exists() {
             return Ok(None);
         }
-        for suffix in ["", "-wal", "-shm"] {
-            let from = container.join(format!("{name}{suffix}"));
-            if from.exists() {
-                fs::copy(&from, self.0.join(format!("{name}{suffix}")))?;
+        let stamp = || -> Vec<Option<(u64, std::time::SystemTime)>> {
+            ["", "-wal"]
+                .iter()
+                .map(|suffix| fs::metadata(container.join(format!("{name}{suffix}"))).ok().and_then(|m| Some((m.len(), m.modified().ok()?))))
+                .collect()
+        };
+        for attempt in 1..=3 {
+            let before = stamp();
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = fs::remove_file(self.0.join(format!("{name}{suffix}")));
+            }
+            for suffix in ["", "-wal"] {
+                let from = container.join(format!("{name}{suffix}"));
+                if from.exists() {
+                    fs::copy(&from, self.0.join(format!("{name}{suffix}")))?;
+                }
+            }
+            if stamp() != before && attempt < 3 {
+                continue;
+            }
+            let db = Connection::open_with_flags(self.0.join(name), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+            let check: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+            if check == "ok" {
+                return Ok(Some(db));
+            }
+            if attempt == 3 {
+                return Err(Error::new("not_readable", format!("{name} changed while it was read: quit WhatsApp and try again")));
             }
         }
-        let db = Connection::open_with_flags(self.0.join(name), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
-        Ok(Some(db))
+        unreachable!("the third attempt returns")
     }
 }
 

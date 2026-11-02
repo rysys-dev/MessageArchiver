@@ -140,9 +140,38 @@ fn chat_guids(source: &Source) -> Result<HashMap<i32, String>, EngineError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Per thread, the messages (and their attachments) `chat_stats` counts more than once: a
+/// message in two chats of one thread (Jane's iMessage and SMS chats) is one of its messages,
+/// as `messages` and `activity` count it (audit L7). Only messages in several chats are read.
+fn doubled(source: &Source, index: &Index) -> Result<HashMap<i32, (u64, u64)>, EngineError> {
+    let mut stmt = source.db.prepare(
+        "SELECT j.message_id, j.chat_id, (SELECT COUNT(*) FROM message_attachment_join a WHERE a.message_id = j.message_id)
+         FROM chat_message_join j
+         WHERE j.message_id IN (SELECT message_id FROM chat_message_join GROUP BY message_id HAVING COUNT(*) > 1)
+         ORDER BY j.message_id",
+    )?;
+    let mut doubled: HashMap<i32, (u64, u64)> = HashMap::new();
+    let (mut current, mut seen) = (None, BTreeSet::new());
+    for row in stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i32>(1)?, r.get::<_, i64>(2)?)))? {
+        let (message, chat, attachments) = row?;
+        if current != Some(message) {
+            current = Some(message);
+            seen.clear();
+        }
+        let Some(thread) = index.thread_of_chat.get(&chat) else { continue };
+        if !seen.insert(*thread) {
+            let d = doubled.entry(*thread).or_default();
+            d.0 += 1;
+            d.1 += attachments as u64;
+        }
+    }
+    Ok(doubled)
+}
+
 pub fn run(source: &Source, out: &mut Output) -> Result<(), EngineError> {
     let index = Index::build(source)?;
     let stats = chat_stats(source)?;
+    let doubled = doubled(source, &index)?;
     let guids = chat_guids(source)?;
     let iso = |raw: Option<i64>| {
         raw.and_then(|d| imessage_database::util::dates::get_local_time(d, source.offset).ok())
@@ -164,6 +193,10 @@ pub fn run(source: &Source, out: &mut Output) -> Result<(), EngineError> {
             total.attachments += s.attachments;
             total.first = [total.first, s.first].into_iter().flatten().min();
             total.last = [total.last, s.last].into_iter().flatten().max();
+        }
+        if let Some((messages, attachments)) = doubled.get(thread_id) {
+            total.messages -= messages;
+            total.attachments -= attachments;
         }
         out.line(&ThreadLine {
             thread_id: *thread_id,

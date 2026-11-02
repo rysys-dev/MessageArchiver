@@ -490,6 +490,39 @@ td {
 }
 /* ———————————————— MessageArchiver additions ———————————————— */
 
+/* Text styles (docs/text-styles.md): what was said is plain; what the app says about a message
+   is italic and muted; a warning is a dashed box in a subtle amber, on its own soft fill so it
+   reads in any bubble; status labels (EDITED…) are .flag. */
+:root {
+    --warning: #8A6A2E;
+    --warning-box-text: #7A5C22;
+    --warning-box-fill: #F6EFE0;
+    --warning-box-border: #B8955A;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --warning: #C9A86A;
+    }
+}
+
+.message div.tapbacks,
+.message span.unsent,
+.message span.expressive,
+.message details.edit_history summary,
+.attachment a.original {
+    font-style: italic;
+}
+
+.message div.tapbacks {
+    opacity: var(--opacity-high);
+    font-size: 0.9em;
+}
+
+.warning {
+    color: var(--warning);
+}
+
 .conversation_header {
     margin: 1% 1% 3%;
     padding-bottom: 1%;
@@ -528,6 +561,13 @@ span.sender .handle {
     background: rgba(0, 0, 0, 0.18);
 }
 
+/* A plug-in's description of a message ("Shared an album"), not words someone wrote. */
+span.source_note {
+    display: block;
+    font-style: italic;
+    opacity: var(--opacity-high);
+}
+
 .recovered_note {
     display: block;
     opacity: var(--opacity-high);
@@ -554,9 +594,17 @@ details.edit_history summary {
 .attachment_missing {
     display: inline-block;
     padding: 6px 10px;
-    border: 1px dashed currentColor;
+    color: var(--warning-box-text);
+    background: var(--warning-box-fill);
+    border: 1px dashed var(--warning-box-border);
     border-radius: 10px;
-    opacity: var(--opacity-high);
+}
+
+/* The notes page's MISSING and NOT COPIED: a warning, not a status label. */
+.flag.warning {
+    color: var(--warning-box-text);
+    background: var(--warning-box-fill);
+    border: 1px dashed var(--warning-box-border);
 }
 
 .attachment a.original {

@@ -43,6 +43,13 @@ fn main() -> ExitCode {
     }
 }
 
+/// Plain text on stdout. A reader that has gone (`help | head -1`) ends it quietly: `print!`
+/// would panic (audit L6).
+fn plain(s: &str) {
+    use std::io::Write;
+    let _ = std::io::stdout().lock().write_all(s.as_bytes());
+}
+
 fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
     match &args.command {
         Command::Describe => probe::describe(out),
@@ -52,7 +59,7 @@ fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
             "imessage_database": CRATE_VERSION,
         }))?),
         Command::Help => {
-            print!("{}", args::USAGE);
+            plain(args::USAGE);
             Ok(())
         }
         Command::Unlock => Ok(out.line(&source::unlock_key(&args.source)?)?),
@@ -60,7 +67,7 @@ fn run(args: &Args, out: &mut Output) -> Result<(), EngineError> {
             let source = source::Source::open(&args.source)?;
             let report = diagnostics::run(&source)?;
             if *text {
-                print!("{}", diagnostics::as_text(&report));
+                plain(&diagnostics::as_text(&report));
                 Ok(())
             } else {
                 Ok(out.line(&report)?)

@@ -68,9 +68,10 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 | `destination_caller_id` | string or null | *always*. The owner's own number or email |
 | `service` | string | *always*. `iMessage`, `SMS`, `RCS`, `Satellite`, … |
 | `text`, `subject` | string or null | *always*. Verbatim, except that attachment placeholders (U+FFFC) are removed |
+| `note` | string | *sometimes*: from a plug-in, its description of the message (“Shared an album”), not what was said |
 | `attachments[]` | object | *always*. See below |
 | `reply_to_guid`, `reply_to_part` | string or null | *always* |
-| `tapbacks[]` | object | *always*. `type`, `emoji`, `action` (`added` or `removed`), `part`, `from`, `is_from_me`, `date` |
+| `tapbacks[]` | object | *always*. `type`, `emoji`, `action` (`added` or `removed`), `part`, `from`, `is_from_me`, `date`; `count` when one entry stands for several people no one named (Telegram) |
 | `edited` | object or null | *always*. `{is_edited, parts: [{part, status, history: [{text, date}]}]}`; the history runs oldest first |
 | `unsent`, `recovered` | boolean | *always* |
 | `expressive` | string or null | *always* |

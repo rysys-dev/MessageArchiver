@@ -188,8 +188,7 @@ public enum IdentityStore {
     public static var url: URL { AppPaths.support.appendingPathComponent("identities.json") }
 
     public static func load(from url: URL = url) -> IdentityOverrides {
-        guard let data = try? Data(contentsOf: url) else { return IdentityOverrides() }
-        return (try? JSONDecoder().decode(IdentityOverrides.self, from: data)) ?? IdentityOverrides()
+        AppPaths.load(IdentityOverrides.self, from: url, default: IdentityOverrides())
     }
 
     public static func save(_ overrides: IdentityOverrides, to url: URL = url) throws {

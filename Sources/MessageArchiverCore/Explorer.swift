@@ -95,6 +95,23 @@ final class ExplorerWriter {
 
     func flush() { files.flush() }
 
+    /// Each non-empty line of a file, read a piece at a time.
+    static func eachLine(of url: URL, piece: Int = 1 << 20, _ body: (Data) throws -> Void) throws {
+        guard let input = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? input.close() }
+        var pending = Data()
+        while let chunk = try input.read(upToCount: piece), !chunk.isEmpty {
+            pending.append(chunk)
+            var start = pending.startIndex
+            while let end = pending[start...].firstIndex(of: 0x0A) {
+                if end > start { try body(Data(pending[start..<end])) }
+                start = pending.index(after: end)
+            }
+            pending = Data(pending[start...])
+        }
+        if !pending.isEmpty { try body(pending) }
+    }
+
     /// Each conversation written in this run, cut into its parts; returns how many each has.
     /// A rebuilt conversation that now has fewer parts sends the extra old ones to the Trash.
     func finish(threads: [ExportThread], prior: [ThreadRef: Int]) throws -> [ThreadRef: Int] {
@@ -102,16 +119,24 @@ final class ExplorerWriter {
         var counts: [ThreadRef: Int] = [:]
         for thread in threads where files.hasStarted(thread.id) {
             let part = files.url(thread)
-            let text = (try? String(contentsOf: part, encoding: .utf8)) ?? ""
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
             let key = Explorer.key(thread.id)
             var n = 0
-            for start in stride(from: 0, to: max(lines.count, 1), by: Explorer.chunkSize) {
-                let slice = lines[start..<min(start + Explorer.chunkSize, lines.count)]
-                let body = "MA.chunk(\(Explorer.literal(key)), \(n), [\n" + slice.joined(separator: ",\n") + "\n]);\n"
-                try placer.place(Data(body.utf8), at: files.root.appendingPathComponent(Explorer.chunkPath(key, n)))
+            // One part's lines at a time, never the whole conversation (audit M12).
+            func write(_ slice: [Data]) throws {
+                let body = Data("MA.chunk(\(Explorer.literal(key)), \(n), [\n".utf8) + Data(slice.joined(separator: Data(",\n".utf8)))
+                    + Data("\n]);\n".utf8)
+                try placer.place(body, at: files.root.appendingPathComponent(Explorer.chunkPath(key, n)))
                 n += 1
             }
+            var slice: [Data] = []
+            try Self.eachLine(of: part) { line in
+                slice.append(line)
+                if slice.count == Explorer.chunkSize {
+                    try write(slice)
+                    slice = []
+                }
+            }
+            if !slice.isEmpty || n == 0 { try write(slice) }
             for old in n..<max(n, prior[thread.id] ?? 0) {
                 try placer.makeRoom(files.root.appendingPathComponent(Explorer.chunkPath(key, old)))
             }

@@ -117,6 +117,12 @@ struct TranscriptDocument {
     // MARK: PDF
 
     func blocks(bates: String) -> [PDFLayout.Block] {
+        [cover(bates: bates)] + body()
+    }
+
+    /// The cover: what states the Bates range, so the only part laid out again as the range
+    /// settles (audit M13).
+    func cover(bates: String) -> PDFLayout.Block {
         var cover: [PDFLayout.Row] = PDFLayout.rows(PDFLayout.text("Transcript of Messages", size: 18, bold: true))
         cover += PDFLayout.rows(PDFLayout.text(" ", size: 8))
         for (label, value) in coverLines(bates: bates) {
@@ -125,8 +131,12 @@ struct TranscriptDocument {
             cover += PDFLayout.rows(PDFLayout.text(" ", size: 4))
         }
         cover += PDFLayout.rows(PDFLayout.text("Entries are numbered in date order. Times are as recorded on the device, with their offset from UTC. Message text is reproduced verbatim. Attachments are listed as exhibits with the SHA-256 of the file in this archive; [MISSING – not on disk] marks an attachment Messages lists but whose file was not on the device.", size: 8.5, italic: true, gray: true))
-        var blocks = [PDFLayout.Block(rows: cover, keep: cover.count, entry: nil, spaceAfter: 0)]
+        return PDFLayout.Block(rows: cover, keep: cover.count, entry: nil, spaceAfter: 0)
+    }
 
+    /// Every entry, starting on the page after the cover: laid out once, whatever the cover says.
+    func body() -> [PDFLayout.Block] {
+        var blocks: [PDFLayout.Block] = []
         let numbers = self.numbers
         var exhibitNumber = 0
         for (i, e) in entries.enumerated() {
@@ -143,8 +153,13 @@ struct TranscriptDocument {
             }
             if !flags.isEmpty { rows += PDFLayout.rows(PDFLayout.text(flags.joined(separator: "   "), size: 9, bold: true)) }
             let keep = rows.count + 1
-            let body = e.text ?? (e.unsent ? "(unsent; no text remains)" : (e.exhibits.isEmpty ? "(no text)" : nil))
-            if let body { rows += PDFLayout.rows(PDFLayout.text(body, size: 10.5), indent: 14) }
+            // The source's description, bracketed: never to be read as the message's words.
+            if let note = e.note { rows += PDFLayout.rows(PDFLayout.text("[\(note)]", size: 10, italic: true, gray: true), indent: 14) }
+            if let text = e.text {
+                rows += PDFLayout.rows(PDFLayout.text(text, size: 10.5), indent: 14)
+            } else if let empty = e.unsent ? "[unsent; no text remains]" : (e.exhibits.isEmpty && e.note == nil ? "[no text]" : nil) {
+                rows += PDFLayout.rows(PDFLayout.text(empty, size: 10, italic: true, gray: true), indent: 14)
+            }
             if e.edited, e.history.count > 1 {
                 rows += PDFLayout.rows(PDFLayout.text("Edit history (oldest first):", size: 8.5, bold: true), indent: 14)
                 for (v, event) in e.history.enumerated() {
@@ -162,7 +177,7 @@ struct TranscriptDocument {
                 }
             }
             for a in e.annotations {
-                rows += PDFLayout.rows(PDFLayout.text(a, size: 8.5, italic: true, gray: true), indent: 14)
+                rows += PDFLayout.rows(PDFLayout.text("[\(a)]", size: 8.5, italic: true, gray: true), indent: 14)
             }
             blocks.append(PDFLayout.Block(rows: rows, keep: min(keep, rows.count), entry: n, pageBreakBefore: i == 0))
         }
@@ -218,8 +233,9 @@ struct TranscriptDocument {
                 flagHTML += " " + (numbers[reply].map { "<a href=\"#e\($0)\">In reply to entry #\($0)</a>" } ?? "In reply to a message not in this transcript")
             }
             if !flagHTML.trimmingCharacters(in: .whitespaces).isEmpty { out += "<p class=\"flags\">\(flagHTML)</p>\n" }
+            if let note = e.note { out += "<p class=\"source_note\">[\(HTML.escape(note))]</p>\n" }
             if let text = e.text { out += "<p class=\"text\">\(HTML.escape(text))</p>\n" }
-            else if e.unsent { out += "<p class=\"text\">(unsent; no text remains)</p>\n" }
+            else if e.unsent { out += "<p class=\"source_note\">[unsent; no text remains]</p>\n" }
             if e.edited, e.history.count > 1 {
                 out += "<ol class=\"history\">" + e.history.map { "<li>\(HTML.escape(Self.timestamp($0.date))): \(HTML.escape($0.text))</li>" }.joined() + "</ol>\n"
             }
@@ -235,7 +251,7 @@ struct TranscriptDocument {
                     out += "<p class=\"exhibit missing\">\(line)</p>\n"
                 }
             }
-            for a in e.annotations { out += "<p class=\"annotation\">\(HTML.escape(a))</p>\n" }
+            for a in e.annotations { out += "<p class=\"annotation\">[\(HTML.escape(a))]</p>\n" }
             out += "</article>\n"
         }
         out += "<footer>MessageArchiver \(HTML.escape(facts.appVersion)) · Bates \(HTML.escape(bates)) in the PDF</footer>\n</body>\n</html>\n"
@@ -253,10 +269,11 @@ struct TranscriptDocument {
         p.flags { font-weight: 600; font-size: 0.85em; margin: 0.1em 0 0.2em 1.1em; }
         p.text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0.2em 0 0.2em 1.1em; }
         ol.history, p.exhibit, p.annotation { font-size: 0.85em; margin: 0.2em 0 0.2em 1.1em; overflow-wrap: anywhere; }
-        p.annotation { color: #555; font-style: italic; } p.missing { color: #a33; }
+        p.annotation { color: #555; font-style: italic; } p.missing { color: #8A6A2E; }
+        p.source_note { color: #555; font-style: italic; margin: 0.2em 0 0.2em 1.1em; }
         img.exhibit { display: block; max-width: 60%; max-height: 22em; margin: 0.3em 0 0.3em 2em; }
         footer { margin: 2em 0; color: #555; font-size: 0.85em; text-align: center; }
-        @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } table.cover th, p.note, p.annotation, article h2 .service, footer { color: #aaa; } a { color: #6cb2ff; } article { border-color: #333; } }
+        @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } table.cover th, p.note, p.annotation, p.source_note, article h2 .service, footer { color: #aaa; } a { color: #6cb2ff; } article { border-color: #333; } p.missing { color: #C9A86A; } }
         """
 }
 

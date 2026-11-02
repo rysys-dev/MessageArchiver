@@ -11,7 +11,7 @@
     --ex-select: #0a64d6;
     --ex-hover: rgba(0, 0, 0, 0.05);
     --ex-field: rgba(0, 0, 0, 0.06);
-    --ex-warn: #b42318;
+    --ex-warn: #8A6A2E;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,7 +24,7 @@
         --ex-select: #2a73d6;
         --ex-hover: rgba(255, 255, 255, 0.06);
         --ex-field: rgba(255, 255, 255, 0.08);
-        --ex-warn: #ff8a80;
+        --ex-warn: #C9A86A;
     }
 }
 
@@ -354,12 +354,15 @@ a.ex_row.selected .ex_row_date {
     outline: 3px solid #F5BD61;
 }
 
+/* About the archive, not something said: italic and muted (docs/text-styles.md). */
 .ex_notice {
     margin: 20px;
     padding: 14px 16px;
     border-radius: 10px;
     background: var(--ex-field);
     font-size: 14px;
+    font-style: italic;
+    color: var(--ex-muted);
 }
 
 .ex_welcome {

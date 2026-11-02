@@ -123,6 +123,9 @@ struct ConversationRenderer: Sendable {
         } else if let guid = m.replyToGuid {
             out += "<a class=\"reply_quote\" href=\"#m-\(HTML.escape(guid))\">↩ In reply to an earlier message</a>\n"
         }
+        if let note = m.note {
+            out += "<hr>\n<div class=\"message_part\"><span class=\"source_note\">\(HTML.escape(note))</span></div>\n"
+        }
         if let text = m.text {
             out += "<hr>\n<div class=\"message_part\"><span class=\"bubble\">\(HTML.text(text))</span></div>\n"
         } else if m.unsent {
@@ -143,7 +146,8 @@ struct ConversationRenderer: Sendable {
         let name = HTML.escape(a.filename)
         let size = HTML.escape(Self.bytes(a.size))
         guard a.kind != .missing, let primary = a.primary.map(HTML.path) else {
-            return "<span class=\"attachment_missing\">[MISSING – not on disk] \(name) (\(size))</span>"
+            // A size of 0 is a size not known (a plug-in's file on its service's servers).
+            return "<span class=\"attachment_missing\">[MISSING – not on disk] \(name)\(a.size > 0 ? " (\(size))" : "")</span>"
         }
         let original = a.original.map(HTML.path)
         var out = "<div class=\"attachment\">"
@@ -208,10 +212,10 @@ struct ConversationRenderer: Sendable {
     func tapbacks(_ list: [ExportMessage.Tapback]) -> String {
         var out = "<div class=\"tapbacks\">\n<hr>\n<p>Tapbacks:</p>\n"
         for t in list {
-            let who = t.isFromMe ? me : (t.from.map { names[$0] ?? $0 } ?? "Unknown")
+            let who = t.isFromMe ? me : (t.from.map { names[$0] ?? $0 } ?? t.unnamed)
             var label = Self.tapbackNames[t.type] ?? t.type
             if t.type == "emoji", let e = t.emoji { label = "Reacted \(e)" }
-            let action = t.action == "removed" ? "<s>\(HTML.escape(label))</s> (removed)" : "<b>\(HTML.escape(label))</b>"
+            let action = t.action == "removed" ? "<s>\(HTML.escape(label))</s> (removed)" : HTML.escape(label)
             out += "<div class=\"tapback\"><span class=\"tapback\">\(action) by \(HTML.escape(who)) <span class=\"timestamp\">\(HTML.escape(time(t.date)))</span></span></div>\n"
         }
         return out + "</div>\n"

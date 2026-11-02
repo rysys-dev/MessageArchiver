@@ -1,7 +1,5 @@
 use std::{
-    fs::OpenOptions,
     io::{self, Cursor, ErrorKind, Read},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
@@ -14,7 +12,7 @@ use imessage_database::{
     util::{dates::get_offset, platform::Platform},
 };
 use ma_backup::{Scratch, Secret, backup_error, check_finished, is_encrypted, password_needed, unlock};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::emit::EngineError;
 
@@ -54,7 +52,7 @@ impl Source {
             return Self::open_backup(path);
         }
         check_readable(&path)?;
-        let db = get_connection(&path)?;
+        let db = open_read_only(&path)?;
         let capabilities = Capabilities::determine(&db).map_err(|e| unreadable(&path, e.into()))?;
         Ok(Self { path, platform: Platform::macOS, db, capabilities, offset: get_offset(), encrypted: None, _scratch: None })
     }
@@ -67,13 +65,16 @@ impl Source {
             _ => e,
         })?;
         if !is_encrypted(&root)? {
-            let db = get_connection(&sms)?;
+            let db = open_read_only(&sms)?;
             let capabilities = Capabilities::determine(&db).map_err(|e| unreadable(&sms, e.into()))?;
             return Ok(Self { path: root, platform: Platform::iOS, db, capabilities, offset: get_offset(), encrypted: None, _scratch: None });
         }
 
         let secret = Secret::read().ok_or_else(password_needed)?;
-        let (backup, scratch) = unlock(&root, &secret)?;
+        // Held as one: a tuple drops the backup before its folder, so an error below doesn't
+        // leave crabapple a file it can't remove, and a plain line on stderr (audit L5).
+        let unlocked = unlock(&root, &secret)?;
+        let backup = &unlocked.0;
         let entry = backup.get_file(SMS_FILE_ID).map_err(|e| backup_error(&root, e))?;
         let size = usize::try_from(entry.metadata.size).map_err(|_| database("sms.db is too large"))?;
         let plain = backup.decrypt_entry_stream(&entry).map_err(|e| backup_error(&root, e))?;
@@ -107,6 +108,7 @@ impl Source {
             crate::emit::warning("backup_size", format!("sms.db decrypted to {real} bytes; the backup’s index says {size}"), None);
         }
         let capabilities = Capabilities::determine(&db).map_err(|e| EngineError::from(e))?;
+        let (backup, scratch) = unlocked;
         Ok(Self {
             path: root,
             platform: Platform::iOS,
@@ -138,19 +140,11 @@ impl Source {
             Some(ext) => format!("{id}.{ext}"),
             None => id.clone(),
         });
-        let entry = backup.get_file(&id).map_err(|e| e.to_string())?;
-        match OpenOptions::new().write(true).create_new(true).mode(0o600).open(&target) {
-            Ok(mut file) => {
-                let mut plain = backup.decrypt_entry_stream(&entry).map_err(|e| e.to_string())?;
-                if let Err(e) = io::copy(&mut plain, &mut file) {
-                    drop(file);
-                    let _ = std::fs::remove_file(&target);
-                    return Err(e.to_string());
-                }
-            }
-            // The same file again (a message in two chats): already there.
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(format!("{}: {e}", target.display())),
+        // Whole or not at all, and decrypted again if an earlier run left it short (W5).
+        match ma_backup::decrypt_to(backup, &id, &target) {
+            Ok(true) => {}
+            Ok(false) => return Err(format!("{id}: not in the backup")),
+            Err(e) => return Err(format!("{}: {}", target.display(), e.message)),
         }
         let size = std::fs::metadata(&target).map(|m| m.len()).ok();
         Ok(AttachmentFile { path: Some(target.to_string_lossy().into_owned()), size_on_disk: size })
@@ -220,6 +214,41 @@ fn sqlite_length(head: &[u8]) -> Option<u64> {
 
 fn database(message: &str) -> EngineError {
     EngineError { code: "database", message: message.into() }
+}
+
+/// Opens a Messages database for reading, writing nothing beside it. SQLite opening a WAL
+/// database read-only with no `-wal` file next to it creates `-wal` and `-shm` there, and an
+/// iPhone's sms.db is WAL: so a backup's database, or a copy chosen as a file, is opened
+/// `immutable` when it has no `-wal` (nothing else writes to it; audit 2026-11-01, H1). This
+/// Mac's own chat.db, which Messages keeps writing, and any database with its `-wal` beside it,
+/// open as usual.
+fn open_read_only(path: &Path) -> Result<Connection, EngineError> {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    let live = default_path().is_ok_and(|p| p == path);
+    if live || Path::new(&wal).exists() {
+        return Ok(get_connection(path)?);
+    }
+    let uri = format!("file:{}?immutable=1", uri_path(path));
+    let db = Connection::open_with_flags(uri, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    // As imessage-database's own `get_connection` sets them.
+    let _ = db.pragma_update(None, "mmap_size", 8_589_934_592_i64);
+    let _ = db.pragma_update(None, "cache_size", -65_536_i64);
+    Ok(db)
+}
+
+/// A path as a `file:` URI's path: every byte but the unreserved ones and `/` percent-encoded.
+fn uri_path(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut out = String::new();
+    for &b in path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 pub(crate) fn default_path() -> Result<PathBuf, EngineError> {

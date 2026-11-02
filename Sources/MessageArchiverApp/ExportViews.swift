@@ -232,10 +232,16 @@ struct DoneView: View {
                         Text("\(Plural.count(r.trashed, "earlier file")) moved to the Trash")
                             .foregroundStyle(.secondary)
                     }
+                    if r.updated && r.keptFromArchive > 0 {
+                        Text("\(Plural.count(r.keptFromArchive, "message")) no longer in Messages or the other sources kept from the archive")
+                            .foregroundStyle(.secondary)
+                    }
                     if let notes = notes(r) { notes }
                     if r.stopped {
-                        Text("The pages written so far are complete files and say the export was stopped.")
+                        Text(r.updated ? "The conversations already in the archive are as they were; new ones written so far say the update was stopped."
+                                       : "The pages written so far are complete files and say the export was stopped.")
                             .foregroundStyle(palette.flag)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(r.failedSources, id: \.self) { failed in
                         Text("Couldn’t be read: \(failed). Its conversations are written and marked incomplete; update the archive later to fill them in.")

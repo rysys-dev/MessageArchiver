@@ -158,8 +158,9 @@ fn probe_backup(root: &std::path::Path) -> ProbeLine {
             });
         }
         let Some(secret) = ma_backup::Secret::read() else { return Ok(("needs_password", None, None)) };
-        let (backup, _scratch) = ma_backup::unlock(root, &secret)?;
-        Ok(match backup.get_file(&id) {
+        // Held as one: the backup closes before its folder goes (audit L5).
+        let unlocked = ma_backup::unlock(root, &secret)?;
+        Ok(match unlocked.0.get_file(&id) {
             Ok(entry) => ("ready", None, Some(entry.metadata.size)),
             Err(_) => ("not_readable", Some("this iPhone backup has no WhatsApp chats".into()), None),
         })

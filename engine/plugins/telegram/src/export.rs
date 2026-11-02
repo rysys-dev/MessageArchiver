@@ -17,14 +17,14 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, fs,
     io::{self, ErrorKind},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use serde::{
     Deserialize, Deserializer,
     de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor},
 };
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 
 /// What went wrong, with the code the app's notice reads (docs/engine-protocol.md).
 #[derive(Debug)]
@@ -190,6 +190,15 @@ struct Raw {
     contacts: Option<List<Contact>>,
     #[serde(default)]
     chats: Option<List<Chat>>,
+    /// Telegram Desktop: groups the owner has left, apart from the others (audit M19).
+    #[serde(default)]
+    left_chats: Option<List<Chat>>,
+}
+
+/// A field an export may write as `null`: its default then, rather than failing the whole
+/// import (audit M21).
+fn or_default<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -199,18 +208,19 @@ struct Owner {
 }
 
 #[derive(Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct List<T> {
-    #[serde(default = "Vec::new")]
+    #[serde(default = "Vec::new", deserialize_with = "or_default")]
     list: Vec<T>,
 }
 
 #[derive(Deserialize)]
 struct Contact {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     first_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     last_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     phone_number: String,
 }
 
@@ -219,10 +229,20 @@ pub struct Chat {
     pub id: i64,
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "or_default")]
     pub kind: String,
+    /// Each message as the export's own text, read in full only when it is used: a large
+    /// export takes about its own size in memory, not several times it (audit M15).
+    #[serde(default, deserialize_with = "or_default")]
+    pub messages: Vec<Box<RawValue>>,
+}
+
+/// What sorting needs of a message, read when the export opens.
+#[derive(Deserialize)]
+struct Head {
+    id: i64,
     #[serde(default)]
-    pub messages: Vec<Message>,
+    date_unixtime: Option<Value>,
 }
 
 /// One message, with the fields either app writes.
@@ -231,8 +251,6 @@ pub struct Message {
     pub id: i64,
     #[serde(rename = "type", default)]
     pub kind: String,
-    #[serde(default)]
-    pub date_unixtime: Option<Value>,
     #[serde(default)]
     pub from: Option<String>,
     #[serde(default)]
@@ -288,10 +306,6 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn time(&self) -> Option<i64> {
-        int(self.date_unixtime.as_ref())
-    }
-
     /// When it was last edited (Telegram Desktop says; Telegram for Mac only that it was).
     pub fn edited_at(&self) -> Option<i64> {
         int(self.edited_unixtime.as_ref())
@@ -333,9 +347,20 @@ pub struct Export {
     /// Every message in a chat read, oldest first.
     pub items: Vec<ItemRef>,
     /// A contact's full name → their number, for names only one contact has.
-    phones: HashMap<String, String>,
+    /// A user's number, by their id: only for someone in a one-to-one chat whose name is one
+    /// contact's (W9).
+    phones: HashMap<i64, String>,
     pub result_size: u64,
 }
+
+/// A message in full. Its id and date were read when the export opened; a field of a type
+/// this reader doesn't expect leaves it empty rather than failing the export.
+pub fn parse(raw: &RawValue) -> Message {
+    serde_json::from_str(raw.get()).unwrap_or_else(|_| Message { id: serde_json::from_str::<Head>(raw.get()).map_or(0, |h| h.id), ..Default::default() })
+}
+
+/// 9999-12-31: the last date a message can have.
+const MAX_TIME: i64 = 253_402_300_799;
 
 impl Export {
     pub fn open(folder: &Path) -> Result<Self, Error> {
@@ -350,7 +375,7 @@ impl Export {
         let result_size = file.metadata()?.len();
         let raw: Raw = serde_json::from_reader(io::BufReader::with_capacity(1 << 20, file))
             .map_err(|e| Error::new("not_readable", format!("{RESULT} couldn’t be read: {e}")))?;
-        let mut phones = HashMap::new();
+        let mut by_name = HashMap::new();
         let mut taken_twice = HashSet::new();
         for c in raw.contacts.map(|c| c.list).unwrap_or_default() {
             let name = format!("{} {}", c.first_name.trim(), c.last_name.trim()).trim().to_string();
@@ -358,20 +383,42 @@ impl Export {
             if name.is_empty() {
                 continue;
             }
-            if phones.insert(name.clone(), phone.clone()).is_some_and(|p| p != phone) {
+            if by_name.insert(name.clone(), phone.clone()).is_some_and(|p| p != phone) {
                 taken_twice.insert(name);
             }
         }
         // A name two contacts share says nothing about which number is whose.
         for name in taken_twice {
-            phones.remove(&name);
+            by_name.remove(&name);
         }
-        let chats: Vec<Chat> = raw.chats.map(|c| c.list).unwrap_or_default().into_iter().filter(|c| is_read(&c.kind)).collect();
+        let chats: Vec<Chat> = [raw.chats, raw.left_chats]
+            .into_iter()
+            .flat_map(|c| c.map(|c| c.list).unwrap_or_default())
+            .filter(|c| is_read(&c.kind))
+            .collect();
+        // The contacts hold no user ids. A one-to-one chat's id is the other person's, and its
+        // name the one the owner gave them, so it ties a contact to an id; a group member
+        // whose name only matches a contact's may be a stranger (audit W9).
+        let phones: HashMap<i64, String> = chats
+            .iter()
+            .filter(|c| c.kind == "personal_chat")
+            .filter_map(|c| Some((c.id, by_name.get(c.name.as_deref()?.trim())?.clone())))
+            .collect();
         let mut items = vec![];
         let mut taken = HashSet::new();
         for (ci, chat) in chats.iter().enumerate() {
-            for (mi, m) in chat.messages.iter().enumerate() {
-                let Some(date) = m.time() else { continue };
+            for (mi, raw) in chat.messages.iter().enumerate() {
+                let Ok(m) = serde_json::from_str::<Head>(raw.get()) else {
+                    ma_protocol::warning("unreadable_message", format!("a message in chat {} couldn’t be read", chat.id), None);
+                    continue;
+                };
+                let Some(date) = int(m.date_unixtime.as_ref()) else { continue };
+                // A date no message can have (a damaged export) is left out: × 1000 would
+                // overflow (audit L9).
+                if !(0..=MAX_TIME).contains(&date) {
+                    ma_protocol::warning("bad_date", format!("a message in chat {} has no possible date", chat.id), None);
+                    continue;
+                }
                 // In time order, so a newer export's new messages come after the ones an
                 // archive already has; the last three digits tell apart messages in one second.
                 let mut rowid = date * 1000 + id_of(&guid(chat.id, m.id)) % 1000;
@@ -385,14 +432,15 @@ impl Export {
         Ok(Export { folder: folder.to_path_buf(), owner: raw.personal_information.and_then(|p| p.user_id), chats, items, phones, result_size })
     }
 
-    pub fn message(&self, r: &ItemRef) -> (&Chat, &Message) {
+    pub fn message(&self, r: &ItemRef) -> (&Chat, Message) {
         let chat = &self.chats[r.chat];
-        (chat, &chat.messages[r.message])
+        (chat, parse(&chat.messages[r.message]))
     }
 
-    /// Someone's handle: their number when their name matches one contact, else `user<id>`.
-    pub fn handle(&self, id: i64, name: Option<&str>) -> String {
-        name.map(str::trim).and_then(|n| self.phones.get(n)).cloned().unwrap_or_else(|| format!("user{id}"))
+    /// Someone's handle: their number when a one-to-one chat ties them to one contact, else
+    /// `user<id>`.
+    pub fn handle(&self, id: i64) -> String {
+        self.phones.get(&id).cloned().unwrap_or_else(|| format!("user{id}"))
     }
 
     pub fn is_owner(&self, id: Option<i64>) -> bool {
@@ -400,13 +448,23 @@ impl Export {
     }
 
     /// A file the export holds: its path, or None when it wasn't exported (Telegram writes a
-    /// note in its place: "(File not included…)").
+    /// note in its place: "(File not included…)"). Only a plain file inside the export folder:
+    /// an absolute path, a `..` or a link would let a doctored export name any file on the Mac.
     pub fn file(&self, relative: &str) -> Option<PathBuf> {
         if relative.starts_with('(') {
             return None;
         }
-        let path = self.folder.join(relative);
-        path.is_file().then_some(path)
+        let rel = Path::new(relative);
+        if !rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+            return None;
+        }
+        let path = self.folder.join(rel);
+        let plain = fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file());
+        let inside = match (path.canonicalize(), self.folder.canonicalize()) {
+            (Ok(real), Ok(folder)) => real.starts_with(folder),
+            _ => false,
+        };
+        (plain && inside).then_some(path)
     }
 }
 

@@ -55,6 +55,9 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         public var first: String
         public var last: String
         public var pages: Int
+        /// Its exhibits' letter ("Exhibit B-0001"), kept so an update that rebuilds it uses the
+        /// same one (audit W2); nil in an archive made before it was kept.
+        public var letter: String? = nil
     }
 
     public struct Thread: Codable, Sendable, Equatable {
@@ -102,6 +105,8 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         public var messagesWritten: Int
         public var newMessages: Int
         public var conversations: [String]
+        /// Messages kept from the archive because their sources no longer hold them (audit H7).
+        public var keptFromArchive: Int? = nil
         public var bates: [Range]
         public var stopped: Bool
     }
@@ -158,6 +163,15 @@ public struct ArchiveState: Codable, Sendable, Equatable {
 
     public static func url(_ root: URL) -> URL {
         root.appendingPathComponent(folder).appendingPathComponent(file)
+    }
+
+    /// A file the archive's own records name (`state.json`, its index), only when it is a plain
+    /// file inside the archive: a damaged record never has the app trash, read or open a file
+    /// anywhere else (audit M3, M4).
+    public static func file(_ relative: String, in root: URL) -> URL? {
+        guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..") else { return nil }
+        let url = root.appendingPathComponent(relative)
+        return ArchiveWriter.isPlainFile(url, under: [ArchiveWriter.realPath(root.path)]) ? url : nil
     }
 
     public static func read(_ root: URL) -> ArchiveState? {

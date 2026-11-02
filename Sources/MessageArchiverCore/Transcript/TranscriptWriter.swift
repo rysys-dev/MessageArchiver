@@ -10,6 +10,7 @@ public struct TranscriptFile: Sendable, Equatable {
     public var lastBates: String
     public var pages: Int
     public var entries: Int
+    public var letter: String
 }
 
 /// The legal transcript (spec §9.4), one per conversation (Q11). While messages stream in, each
@@ -73,7 +74,7 @@ final class TranscriptWriter: FormatWriter {
 
         var annotations: [String] = []
         for t in m.tapbacks {
-            let who = t.isFromMe ? (options.ownerName.isEmpty ? "Me" : options.ownerName) : (t.from.map { h in renderer.names[h].map { "\($0) (\(h))" } ?? h } ?? "Unknown")
+            let who = t.isFromMe ? (options.ownerName.isEmpty ? "Me" : options.ownerName) : (t.from.map { h in renderer.names[h].map { "\($0) (\(h))" } ?? h } ?? t.unnamed)
             var label = ConversationRenderer.tapbackNames[t.type] ?? t.type
             if t.type == "emoji", let e = t.emoji { label = "Reacted \(e)" }
             annotations.append("Tapback: \(label) by \(who), \(TranscriptDocument.timestamp(t.date))" + (t.action == "removed" ? " (removed)" : ""))
@@ -94,7 +95,7 @@ final class TranscriptWriter: FormatWriter {
             edited: edited?.isEdited == true, history: history,
             unsentParts: edited?.parts.filter { $0.status == "unsent" }.count ?? 0,
             unsent: m.unsent, recovered: m.recovered, replyTo: m.replyToGuid,
-            exhibits: withMime, annotations: annotations)
+            exhibits: withMime, annotations: annotations, note: m.kind == "announcement" ? nil : m.note)
     }
 
     func flush() { files.flush() }
@@ -105,10 +106,13 @@ final class TranscriptWriter: FormatWriter {
 
     /// Lays out every transcript, in index order (by title), numbering pages on from
     /// `startBates`: the archive's next number in an update (unchanged transcripts keep theirs).
+    /// A conversation keeps its exhibit letter from `letters` (the archive's); one without takes
+    /// the first letter no conversation in the archive has (audit W2).
     func produce(threads: [ExportThread], facts: TranscriptFacts, people: [String: ExportPerson], startBates: Int,
-                 problem: (String) -> Void) async throws -> [TranscriptFile] {
+                 letters: [ThreadRef: String] = [:], hashCache: HashCache? = nil, problem: (String) -> Void) async throws -> [TranscriptFile] {
         let root = files.root
-        let hashes = await FileHash.sha256(exhibitPaths.map { root.appendingPathComponent($0) })
+        let exhibits = exhibitPaths.map { root.appendingPathComponent($0) }
+        let hashes = if let hashCache { await hashCache.sha256(exhibits, root: root) } else { await FileHash.sha256(exhibits) }
         let byPath = Dictionary(uniqueKeysWithValues: hashes.map { ($0.key.path.replacingOccurrences(of: root.path + "/", with: ""), $0.value) })
         var sizes: [String: Int64] = [:]
         for path in exhibitPaths {
@@ -118,24 +122,36 @@ final class TranscriptWriter: FormatWriter {
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         var next = startBates
         var made: [TranscriptFile] = []
+        var taken = Set(letters.values), free = 0
+        func letter(_ thread: ExportThread) -> String {
+            if let kept = letters[thread.id] { return kept }
+            while taken.contains(TranscriptDocument.letter(free)) { free += 1 }
+            let letter = TranscriptDocument.letter(free)
+            taken.insert(letter)
+            return letter
+        }
         let decoder = JSONDecoder()
-        for (index, thread) in ordered.enumerated() {
+        for thread in ordered {
             let part = files.url(thread)
             let entries = ((try? String(contentsOf: part, encoding: .utf8)) ?? "")
                 .split(separator: "\n").compactMap { try? decoder.decode(TranscriptEntry.self, from: Data($0.utf8)) }
-            let doc = TranscriptDocument(thread: thread, letter: TranscriptDocument.letter(index), entries: entries,
+            let doc = TranscriptDocument(thread: thread, letter: letter(thread), entries: entries,
                                          options: options, facts: facts, hashes: byPath, sizes: sizes, archiveRoot: root, people: people)
             // The cover states the Bates range, which needs the page count: lay out until the
             // count holds (the range's own text could, in principle, change the cover's length).
+            // The entries start on a page of their own, so they are laid out once; only the
+            // cover again (audit M13).
             let start = next
             let first = options.bates(start)
-            var final = PDFLayout.paginate(doc.blocks(bates: "\(first) – \(first)"))
+            let body = PDFLayout.paginate(doc.body()).filter { !$0.rows.isEmpty }
+            var cover = PDFLayout.paginate([doc.cover(bates: "\(first) – \(first)")])
             for _ in 0..<3 {
-                let again = PDFLayout.paginate(doc.blocks(bates: "\(first) – \(options.bates(start + final.count - 1))"))
-                let settled = again.count == final.count
-                final = again
+                let again = PDFLayout.paginate([doc.cover(bates: "\(first) – \(options.bates(start + cover.count + body.count - 1))")])
+                let settled = again.count == cover.count
+                cover = again
                 if settled { break }
             }
+            let final = cover + body
             let decoration = PDFLayout.Decoration(
                 headerLeft: options.matter.isEmpty ? "Transcript of Messages" : options.matter,
                 headerRight: thread.title,
@@ -145,19 +161,25 @@ final class TranscriptWriter: FormatWriter {
                 author: options.preparedBy.isEmpty ? "MessageArchiver" : options.preparedBy,
                 creator: "MessageArchiver \(facts.appVersion)")
             let pdfName = baseName(thread) + ".pdf"
+            try? FileManager.default.removeItem(at: part)
+            // Drawn in full before an earlier one goes to the Trash; only a transcript that was
+            // written is recorded, with its Bates range (audit 2026-11-01, H10). One that
+            // couldn't be keeps the earlier one, and its numbers.
             do {
                 let pdfURL = root.appendingPathComponent("Transcripts").appendingPathComponent(pdfName)
-                try placer.makeRoom(pdfURL)
-                try PDFLayout.draw(final, decoration: decoration, to: pdfURL)
+                let staged = FilePlacer.staging(pdfURL)
+                try? FileManager.default.removeItem(at: staged)
+                try PDFLayout.draw(final, decoration: decoration, to: staged)
+                try placer.place(staged: staged, at: pdfURL)
                 let html = doc.html(bates: "\(first) – \(options.bates(start + final.count - 1))", pdfName: pdfName)
                 try placer.place(Data(html.utf8), at: root.appendingPathComponent(htmlPath(of: thread)))
             } catch {
                 problem("Transcript for \(thread.title) couldn’t be written: \(error.localizedDescription)")
+                continue
             }
-            try? FileManager.default.removeItem(at: part)
             made.append(TranscriptFile(threadId: thread.id, title: thread.title, pdf: path(of: thread), html: htmlPath(of: thread),
                                        firstBates: first, lastBates: options.bates(start + final.count - 1),
-                                       pages: final.count, entries: entries.count))
+                                       pages: final.count, entries: entries.count, letter: doc.letter))
             next = start + final.count
         }
         return made

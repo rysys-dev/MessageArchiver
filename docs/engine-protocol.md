@@ -149,7 +149,7 @@ or linked in `chat_lookup`. One person over iMessage and over SMS is therefore o
  "first_date":"2024-03-14T15:30:22-07:00","last_date":"2024-03-15T15:30:22-07:00"}
 ```
 
-`message_count` counts every row joined to the thread's chats, tapbacks included.
+`message_count` counts every message in the thread's chats once (a message in two of its chats is one), tapbacks included.
 
 ## Handles
 
@@ -210,6 +210,10 @@ This is spec §3.2, as built. Every field is always present, and `null` means ab
 - **`service`:** `iMessage`, `SMS`, `RCS`, `Satellite`, or whatever else the row says.
 - **`text`** is verbatim, except that U+FFFC (where an attachment sat) is removed and the ends
   are trimmed. It is `null` when nothing is left.
+- **`note`** (optional; plug-ins, 2026-10-22): what the source says about the message, not
+  what was said: "Shared an album", "A message with no text". The app shows it apart from
+  `text` (muted on pages, in italics in Markdown, bracketed in transcripts), so it is never
+  taken for someone's words. Messages' own engine never sends one; app 1.2.0 and earlier ignore it.
 - **`attachments`:** `missing` is true when there is no file at `path`, and `path` is null when
   the database has none. `size` is what the database records, and `size_on_disk` is the file's
   real size. `app_payload` is true for the data behind an app message (a link preview, a poll,
@@ -219,7 +223,9 @@ This is spec §3.2, as built. Every field is always present, and `null` means ab
   them.
 - **`tapbacks`** are in date order, each with `action` `added` or `removed`, so a later removal
   is visible rather than silently dropped. `type` is `love`, `like`, `dislike`, `laugh`,
-  `emphasize`, `question`, `emoji` (with `emoji`), or `sticker`. Tapbacks and poll votes are
+  `emphasize`, `question`, `emoji` (with `emoji`), or `sticker`. A source that counts reactions
+  it doesn't name (Telegram, past the latest few) gives them as one tapback with `from` null and
+  `count`; without `count` a tapback is one person's. Tapbacks and poll votes are
   not separate lines: they appear on the message they belong to, as in imessage-exporter.
 - **`edited`** (this differs from spec §3.2, which had one flat history):
   `{"is_edited":true,"parts":[{"part":0,"status":"edited","history":[{"text":"…","date":"…"}, …]}]}`.

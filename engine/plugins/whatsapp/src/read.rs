@@ -283,11 +283,17 @@ pub fn messages(store: &Store, filter: &Filter, out: &mut dyn FnMut(&MessageLine
 }
 
 fn message(store: &Store, r: Row, t: Option<DateTime<Utc>>) -> MessageLine {
-    // Who wrote it: in a group, the member; one-to-one, the other person.
+    // Who wrote it: in a group, the member; one-to-one, the other person. A group's ZFROMJID
+    // is the group itself, so a member row that is gone (someone who left) leaves no sender
+    // rather than the group (audit W4).
     let sender_jid = if r.from_me {
         None
     } else if r.group {
-        r.member.clone().or(r.from.clone())
+        let member = r.member.clone().or(r.from.clone().filter(|j| *j != r.chat_jid && !j.ends_with("@g.us")));
+        if member.is_none() {
+            ma_protocol::warning("unknown_sender", "a group message whose sender WhatsApp no longer names", Some(r.rowid));
+        }
+        member
     } else {
         r.from.clone().or(Some(r.chat_jid.clone()))
     };

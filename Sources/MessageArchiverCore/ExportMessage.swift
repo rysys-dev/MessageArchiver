@@ -26,6 +26,12 @@ public struct ExportMessage: Codable, Sendable, Hashable {
         public var from: String?
         public var isFromMe: Bool
         public var date: String?
+        /// How many gave it, when the source counts reactions it doesn't name (Telegram, past
+        /// the latest few); nil for one.
+        public var count: Int? = nil
+
+        /// Who gave it when no one is named: "Unknown", or "20000 people".
+        var unnamed: String { (count ?? 1) > 1 ? "\(count ?? 1) people" : "Unknown" }
     }
 
     public struct Edited: Codable, Sendable, Hashable {
@@ -65,6 +71,10 @@ public struct ExportMessage: Codable, Sendable, Hashable {
     public var destinationCallerId: String?
     public var service: String
     public var text: String?
+    /// What the source says about the message, not what was said: "Shared an album", "A message
+    /// with no text". Optional (plug-ins, 2026-10-22); shown apart from the text, so it can't be
+    /// taken for words someone wrote.
+    public var note: String?
     public var subject: String?
     public var attachments: [Attachment]
     public var replyToGuid: String?

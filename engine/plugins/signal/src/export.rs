@@ -16,7 +16,7 @@
 //! None of them is printed: only names, numbers and messages leave this module.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt, fs,
     io::{self, BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -144,6 +144,9 @@ pub struct Chat {
     pub thread_id: i64,
 }
 
+/// 9999-12-31, in milliseconds: the last time a message can have.
+const MAX_TIME_MS: i64 = 253_402_300_799_000;
+
 /// Where one `chatItem` line is, and what it is sorted by.
 #[derive(Debug, Clone, Copy)]
 pub struct ItemRef {
@@ -176,6 +179,9 @@ pub struct Export {
     pub chats: HashMap<String, Chat>,
     /// Every message in a chat read, oldest first.
     pub items: Vec<ItemRef>,
+    /// The handle of everyone who wrote one of them, found while the export is read, so
+    /// `handles` needn't read every message again (audit M17).
+    pub authors: BTreeSet<String>,
     /// An ACI (base64) → the recipient's export-local id, for group members and events.
     by_aci: HashMap<String, String>,
     /// `files/`: a file's name without its extension → where it is.
@@ -197,26 +203,29 @@ impl Export {
             recipients: HashMap::new(),
             chats: HashMap::new(),
             items: vec![],
+            authors: BTreeSet::new(),
             by_aci: HashMap::new(),
             files: files(&folder.join("files")),
             main_size,
         };
         let mut raw_chats = vec![];
         let mut raw_items: Vec<(Value, Media, u64, usize)> = vec![];
-        let (mut offset, mut line, mut number) = (0u64, String::new(), 0u64);
+        // By bytes, so one line that isn't UTF-8 is that line's warning, not the export's
+        // failure (audit M20).
+        let (mut offset, mut line, mut number) = (0u64, Vec::new(), 0u64);
         loop {
             line.clear();
-            let n = reader.read_line(&mut line)?;
+            let n = reader.read_until(b'\n', &mut line)?;
             if n == 0 {
                 break;
             }
             number += 1;
             let start = offset;
             offset += n as u64;
-            if line.trim().is_empty() {
+            if line.trim_ascii().is_empty() {
                 continue;
             }
-            let frame: Value = match serde_json::from_str(&line) {
+            let frame: Value = match serde_json::from_slice(&line) {
                 Ok(v) => v,
                 Err(e) => {
                     ma_protocol::warning("unreadable_line", format!("line {number} of {MAIN}: {e}"), None);
@@ -255,13 +264,20 @@ impl Export {
             let thread_id = chat.thread_id;
             let (sent, received) = (original_sent(&item), first_received(&item));
             let Some(sent) = sent else { continue };
+            // A time no message can have (a damaged export) is left out: × 1000 would overflow
+            // (audit L9).
+            let Some(base) = received.unwrap_or(sent).checked_mul(1000).filter(|_| (0..=MAX_TIME_MS).contains(&sent)) else {
+                ma_protocol::warning("bad_date", "a message has no possible date", None);
+                continue;
+            };
             // In the order Signal Desktop got them, so a newer export's new messages come
             // after the ones an archive already has; the last three digits tell apart two
             // messages in the same millisecond.
-            let mut rowid = received.unwrap_or(sent) * 1000 + export.guid_of(&item).map_or(0, |g| id_of(&g) % 1000);
+            let mut rowid = base + export.guid_of(&item).map_or(0, |g| id_of(&g) % 1000);
             while !taken.insert(rowid) {
                 rowid += 1;
             }
+            export.authors.extend(export.handle_of(str(&item, "authorId")));
             let edited_at = item.get("revisions").and_then(Value::as_array).is_some_and(|r| !r.is_empty()).then(|| last_change(&item)).flatten();
             export.items.push(ItemRef { date: sent, rowid, thread_id, edited_at, media, offset, len });
         }
@@ -345,6 +361,10 @@ fn files(dir: &Path) -> HashMap<String, PathBuf> {
     for sub in subdirs.flatten() {
         let Ok(entries) = fs::read_dir(sub.path()) else { continue };
         for e in entries.flatten() {
+            // A link could point anywhere on the Mac: only the export's own files.
+            if !e.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
             let path = e.path();
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                 found.insert(stem.to_ascii_lowercase(), path);
