@@ -56,7 +56,7 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.2.0-manual.pdf">full manual (PDF, 45 pages, 7.0 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
 
 <nav aria-label="Contents">
   <ol>
@@ -149,6 +149,7 @@ th { color: var(--muted); font-weight: 600; }
   <tr><td><code>Attachments/</code></td><td>Photos, videos, voice notes and files, named by date, each dated as it was sent.</td></tr>
   <tr><td><code>manifest.json</code>, <code>SHA256SUMS.txt</code></td><td>The size and SHA-256 of every file, to prove nothing changed.</td></tr>
 </table></div>
+<p>What someone wrote never looks like what MessageArchiver adds about it: what was said is plain text; anything about a message (reactions, "unsent this message", effects, earlier versions, a plug-in's description such as "A message with no text") is in <em>italics, in a lighter color</em>, and in [brackets] in transcripts; something missing, such as a photo whose file isn't on the Mac, is in a box with a dashed, amber outline; EDITED, UNSENT and RECOVERED are small labels beside the time.</p>
 <p>If another app's messages couldn't be read during an export (see <a href="#plugins">Other apps</a>), the rest is exported, and the conversations that draw on that app are marked <strong>incomplete</strong> in the index, on their transcripts and in <code>archive.json</code>. Updating the archive later fills them in.</p>
 <p><strong>Missing attachments</strong> are ones the messages name but whose file wasn't where they were read from (for Messages, on the Mac); they're listed in <code>attachment-notes.html</code>, and each conversation's count in the index links there. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
 
