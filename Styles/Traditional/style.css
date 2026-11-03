@@ -630,6 +630,11 @@ details.edit_history summary {
     font-size: 0.9em;
 }
 
+/* The archive details' first line (2026-11-03): what this page is, and the way to the Explorer. */
+.index_role {
+    font-size: 1.05em;
+}
+
 /* The index's search box (2026-10-22): typing narrows the list. */
 .index_filter {
     margin-top: 10px;

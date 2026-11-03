@@ -32,6 +32,9 @@ public struct SavedSettings: Sendable, Hashable, Codable {
     public var convertMedia = true
     public var keepOriginals = true
     public var recognizeText = false
+    /// Settings ▸ Legal tools (decision 2026-11-03): transcripts, Bates numbers and exhibits
+    /// are shown only when it is on; off on a new install.
+    public var legalTools = false
     /// The export folder chosen for each source of the `export` kind (Milestone 20), by source
     /// id: read again on every launch.
     public var exportFolders: [String: String] = [:]
@@ -51,6 +54,7 @@ public struct SavedSettings: Sendable, Hashable, Codable {
         convertMedia = c.value(.convertMedia, d.convertMedia)
         keepOriginals = c.value(.keepOriginals, d.keepOriginals)
         recognizeText = c.value(.recognizeText, d.recognizeText)
+        legalTools = c.value(.legalTools, d.legalTools)
         exportFolders = c.value(.exportFolders, d.exportFolders)
     }
 

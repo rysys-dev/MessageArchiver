@@ -129,6 +129,7 @@ final class SearchModel {
 
 struct SearchView: View {
     @Environment(SearchModel.self) private var model
+    @Environment(AppState.self) private var state
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -163,14 +164,16 @@ struct SearchView: View {
                     }
                 }
                 Spacer()
-                Menu("Exhibits") {
-                    ForEach(model.exhibits) { e in
-                        Button("\(e.name) (v\(e.versions.map(\.number).max() ?? 0))") { model.openExhibit(e) }
+                if state.legalTools {
+                    Menu("Exhibits") {
+                        ForEach(model.exhibits) { e in
+                            Button("\(e.name) (v\(e.versions.map(\.number).max() ?? 0))") { model.openExhibit(e) }
+                        }
                     }
+                    .fixedSize()
+                    .disabled(model.exhibits.isEmpty)
+                    .help("Exhibits saved in this archive: choose one to make it again")
                 }
-                .fixedSize()
-                .disabled(model.exhibits.isEmpty)
-                .help("Exhibits saved in this archive: choose one to make it again")
                 Button("Open Archive…") { model.choose() }
             }
             TextField("Search", text: $model.query, prompt: Text("Search what the messages say"))
@@ -251,10 +254,12 @@ struct SearchView: View {
                 HStack {
                     Text("\(hit.threadTitle) · \(Dates.short(hit.date ?? ""))").font(.headline).lineLimit(1)
                     Spacer()
-                    Button("New Exhibit…") { model.newExhibit() }
-                        .disabled(!model.canMakeExhibit)
-                        .help(model.canMakeExhibit ? "Choose messages of this conversation for an exhibit of its transcript"
-                              : "This conversation has no legal transcript in this archive")
+                    if state.legalTools {
+                        Button("New Exhibit…") { model.newExhibit() }
+                            .disabled(!model.canMakeExhibit)
+                            .help(model.canMakeExhibit ? "Choose messages of this conversation for an exhibit of its transcript"
+                                  : "This conversation has no legal transcript in this archive")
+                    }
                     if hit.page != nil {
                         Button("Open in Browser") { model.openInBrowser() }
                             .help("Opens the conversation page in your browser")

@@ -49,17 +49,8 @@ extension LineQueue: MergeInput {
 /// hold hundreds of open files, and only the next few lines of each are in memory. Read on the
 /// merge's one thread only.
 final class ArchivedMessages: MergeInput, @unchecked Sendable {
-    enum Layout {
-        /// The message store's own lines.
-        case store
-        /// An archive made before the store (version 1.2 and earlier): its JSON document, one
-        /// message per line, with the archive's own fields added.
-        case json
-    }
-
     let conversation: ThreadRef
     let url: URL
-    let layout: Layout
     let archived = true
     static let chunk = 32 * 1024
 
@@ -69,23 +60,16 @@ final class ArchivedMessages: MergeInput, @unchecked Sendable {
     private var ended = false
     private var current: MergeItem?
 
-    init(conversation: ThreadRef, url: URL, layout: Layout) {
+    init(conversation: ThreadRef, url: URL) {
         self.conversation = conversation
         self.url = url
-        self.layout = layout
     }
 
-    /// Where an update finds a conversation's archived messages: the store, else (an archive
-    /// made before it) the JSON document; nil when it has neither.
+    /// A conversation's archived messages, from the store; nil when it has none.
     static func find(_ record: ArchiveState.Thread, root: URL) -> ArchivedMessages? {
         let store = MessageStore.url(root, record.id)
-        if FileManager.default.fileExists(atPath: store.path) {
-            return ArchivedMessages(conversation: record.id, url: store, layout: .store)
-        }
-        if let json = record.files[ExportFormat.json.rawValue].flatMap({ ArchiveState.file($0, in: root) }) {
-            return ArchivedMessages(conversation: record.id, url: json, layout: .json)
-        }
-        return nil
+        guard FileManager.default.fileExists(atPath: store.path) else { return nil }
+        return ArchivedMessages(conversation: record.id, url: store)
     }
 
     func waiting() -> MergeItem? {
@@ -137,31 +121,10 @@ final class ArchivedMessages: MergeInput, @unchecked Sendable {
     }
 
     private func parse(_ line: Data) -> MergeItem? {
-        switch layout {
-        case .store:
-            guard let tab = line.firstIndex(of: 0x09) else { return nil }
-            let source = SourceID(rawValue: String(decoding: line[line.startIndex..<tab], as: UTF8.self))
-            let raw = Data(line[line.index(after: tab)...])
-            guard let m = try? Engine.decoder.decode(ExportMessage.self, from: raw) else { return nil }
-            return MergeItem(message: m, line: raw, source: source, conversation: conversation)
-        case .json:
-            // `    {…}` or `    {…},` in the `messages` list; the document's other lines aren't messages.
-            var text = String(decoding: line, as: UTF8.self)
-            guard text.hasPrefix("    {") else { return nil }
-            text = text.trimmingCharacters(in: .whitespaces)
-            if text.hasSuffix(",") { text.removeLast() }
-            guard var object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
-            let source = (object["source"] as? String).map(SourceID.init(rawValue:)) ?? .messages
-            // The JSON names another source's thread "whatsapp:3"; the engine's line has the number.
-            if let ref = (object["thread_id"] as? String).flatMap(ThreadRef.init) { object["thread_id"] = ref.id }
-            for key in ["source", "sender_person_id"] { object[key] = nil }
-            if var list = object["attachments"] as? [[String: Any]] {
-                for i in list.indices { list[i]["archive_path"] = nil; list[i]["original_archive_path"] = nil }
-                object["attachments"] = list
-            }
-            guard let raw = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes]),
-                  let m = try? Engine.decoder.decode(ExportMessage.self, from: raw) else { return nil }
-            return MergeItem(message: m, line: raw, source: source, conversation: conversation)
-        }
+        guard let tab = line.firstIndex(of: 0x09) else { return nil }
+        let source = SourceID(rawValue: String(decoding: line[line.startIndex..<tab], as: UTF8.self))
+        let raw = Data(line[line.index(after: tab)...])
+        guard let m = try? Engine.decoder.decode(ExportMessage.self, from: raw) else { return nil }
+        return MergeItem(message: m, line: raw, source: source, conversation: conversation)
     }
 }

@@ -55,8 +55,7 @@ final class TranscriptWriter: FormatWriter {
         Self.entry(m, attachments: attachments, renderer: renderer, options: options)
     }
 
-    /// One message as the transcript states it; also how a transcript made before exhibits is
-    /// rebuilt from the archive (Milestone 23).
+    /// One message as the transcript states it.
     static func entry(_ m: ExportMessage, attachments: [RenderedAttachment], renderer: ConversationRenderer,
                       options: TranscriptOptions) -> TranscriptEntry {
         let sender: String

@@ -68,14 +68,12 @@ public enum Exhibits {
     }
 
     public enum Problem: LocalizedError, Equatable {
-        case notAnArchive
         case noTranscript(String)
         case nothingChosen
         case badPrefix
 
         public var errorDescription: String? {
             switch self {
-            case .notAnArchive: "This folder isn’t an archive MessageArchiver made."
             case .noTranscript(let title): "“\(title)” has no legal transcript in this archive to take an exhibit from."
             case .nothingChosen: "Choose at least one message for the exhibit."
             case .badPrefix: "The Bates prefix can’t contain a slash or a line break."
@@ -104,8 +102,7 @@ public enum Exhibits {
             .map { ($0.id, $0.title) }
     }
 
-    /// A conversation's transcript entries, to choose from; nil when its transcript didn't keep
-    /// them (made before exhibits).
+    /// A conversation's transcript entries, to choose from; nil when it has no transcript.
     public static func candidates(_ root: URL, thread: ThreadRef) -> [ExhibitCandidate]? {
         guard TranscriptRecord.read(root, thread) != nil, let entries = TranscriptRecord.entries(root, thread) else { return nil }
         return entries.enumerated().map { i, e in
@@ -126,7 +123,7 @@ public enum Exhibits {
     /// archive's prefix), records the run, and writes the manifest again. Returns the exhibit as
     /// saved.
     public static func make(_ exhibit: Exhibit, root: URL, prefix: String, start: Int, trash: TrashCan) async throws -> Exhibit {
-        guard var state = ArchiveState.read(root) else { throw Problem.notAnArchive }
+        guard var state = ArchiveState.read(root) else { throw UpdateError.refusing(root) }
         guard !exhibit.guids.isEmpty else { throw Problem.nothingChosen }
         guard !prefix.contains(where: { $0 == "/" || $0.isNewline }) else { throw Problem.badPrefix }
         guard let record = TranscriptRecord.read(root, exhibit.thread), let entries = TranscriptRecord.entries(root, exhibit.thread),
@@ -250,7 +247,7 @@ public enum Exhibits {
         // Trash once the new one is in place.
         let manifest = ArchiveManifest.read(root)
         _ = try await ArchiveManifest.write(root: root, archive: state.archiveName,
-                                            source: URL(fileURLWithPath: manifest?.source.path ?? state.source.path),
+                                            source: URL(fileURLWithPath: manifest?.source.path ?? state.sourcePath),
                                             sourceSHA256: manifest?.source.sha256, created: now,
                                             placer: FilePlacer(trash: trash), cache: cache)
         try? cache.save(keeping: Set(ArchiveManifest.files(in: root)))

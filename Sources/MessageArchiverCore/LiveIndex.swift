@@ -31,11 +31,13 @@ public enum LiveIndex {
         let iso = ISO8601DateFormatter()
         iso.timeZone = .current
         let maxRowid = try await engine.diagnostics(source: source).messages.maxRowid ?? 0
-        var existing = try? ArchiveSearch(url: url, root: url.deletingLastPathComponent())
-        // An index from before Milestone 14 knows no services: built again, in full.
-        let rebuild = existing != nil && !(existing?.hasServices ?? false)
-        if rebuild { existing = nil }
-        // Messages keeps 1.0's keys; another source's are named for it.
+        let existing = try? ArchiveSearch(url: url, root: url.deletingLastPathComponent())
+        // One that can't be read (made by an earlier version, or damaged) is built again, in full:
+        // it is the app's own copy, made from the sources.
+        if existing == nil {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) }
+        }
+        // Messages' keys have no suffix; another source's are named for it.
         let (positionKey, updatedKey) = engine.sourceID == .messages
             ? ("last_rowid", "updated") : ("last_rowid.\(engine.sourceID)", "updated.\(engine.sourceID)")
         let lastRowid = existing?.meta(positionKey).flatMap(Int64.init)
@@ -54,7 +56,7 @@ public enum LiveIndex {
         }
 
         try prepareFolder(url.deletingLastPathComponent())
-        let writer = try SearchIndexWriter(url: url, replacing: keep.map { Array($0) } ?? [], replacingAll: rebuild)
+        let writer = try SearchIndexWriter(url: url, replacing: keep.map { Array($0) } ?? [])
         let feeder = Feeder(writer: writer, source: engine.sourceID, keep: keep, progress: progress)
         try await engine.run(arguments, onEvent: { event in
             if case .progress(_, let done, let total) = event { feeder.total(done, total) }

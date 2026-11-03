@@ -22,7 +22,6 @@ final class ExhibitModel {
     var reason = Redaction.reasons[0]
     var otherReason = ""
     private(set) var candidates: [ExhibitCandidate] = []
-    private(set) var needsRebuild = false
     var prefix: String
     var start: Int
     private(set) var working: String?
@@ -50,13 +49,7 @@ final class ExhibitModel {
     var nextVersion: Int { (exhibit.versions.map(\.number).max() ?? 0) + 1 }
 
     func load() {
-        if let list = Exhibits.candidates(root, thread: thread) {
-            candidates = list
-            needsRebuild = false
-        } else {
-            candidates = []
-            needsRebuild = Exhibits.needsRebuild(root, thread: thread)
-        }
+        candidates = Exhibits.candidates(root, thread: thread) ?? []
         let next = Exhibits.nextBates(root)
         if prefix == next.prefix { start = max(start, next.start) }
     }
@@ -127,22 +120,6 @@ final class ExhibitModel {
             && !prefix.isEmpty && start >= 1
     }
 
-    func rebuild(busy: Bool) async {
-        guard !busy else { error = "An export or update is running. Rebuild once it has finished."; return }
-        working = "Rebuilding the transcript…"
-        error = nil
-        do {
-            try await Exhibits.rebuildTranscript(root, thread: thread, trash: .standard())
-            let next = Exhibits.nextBates(root)
-            prefix = next.prefix
-            start = next.start
-        } catch {
-            self.error = error.localizedDescription
-        }
-        working = nil
-        load()
-    }
-
     func make(busy: Bool) async {
         guard !busy else { error = "An export or update is running. Make the exhibit once it has finished."; return }
         working = "Making the exhibit…"
@@ -188,8 +165,6 @@ struct ExhibitView: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let made = model.made {
                 finished(made)
-            } else if model.needsRebuild {
-                rebuild
             } else {
                 chooser
             }
@@ -299,28 +274,6 @@ struct ExhibitView: View {
             .padding(4)
         } label: {
             Text("Redactions").font(.callout.weight(.semibold))
-        }
-    }
-
-    private var rebuild: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("This conversation’s transcript was made by MessageArchiver 1.3 or earlier, which didn’t keep what an exhibit needs.")
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Rebuilding makes the transcript again from this archive: the same messages, with the archive’s next Bates numbers (from \(model.prefix)\(String(format: "%06d", model.start))). The old transcript stays beside it, its name ending “(made <date>)”, so numbers already sent out still point to the same pages.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            HStack {
-                if let working = model.working {
-                    ProgressView().controlSize(.small)
-                    Text(working).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Cancel", action: done).keyboardShortcut(.cancelAction)
-                Button("Rebuild Transcript") { Task { await model.rebuild(busy: state.isExporting) } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.working != nil)
-            }
         }
     }
 

@@ -48,7 +48,7 @@ extension AppState {
         panel.message = "Choose an archive MessageArchiver made, to keep it up to date."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard ArchiveState.read(url) != nil else {
-            inform("This folder can’t be updated", UpdateError.notAnArchive(url.path).localizedDescription)
+            inform("This folder can’t be updated", UpdateError.refusing(url).localizedDescription)
             return
         }
         // Only an archive of this Mac's Messages updates on its own: one made from an iPhone
@@ -115,7 +115,7 @@ extension AppState {
                 if !ok { needs.append("\(name): \(summary)") }
             }
             guard ArchiveState.read(root) != nil else {
-                note(false, "Not found. Is its drive connected?")
+                note(false, ArchiveState.earlier(root) != nil ? UpdateError.refusing(root).localizedDescription : "Not found. Is its drive connected?")
                 continue
             }
             quiet = true

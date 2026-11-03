@@ -38,9 +38,13 @@ public enum ArchiveWriter {
         let root: URL
         let prior: ArchiveState?
         if let existing = request.update {
-            guard let state = ArchiveState.read(existing) else { throw UpdateError.notAnArchive(existing.path) }
+            guard let state = ArchiveState.read(existing) else { throw UpdateError.refusing(existing) }
             root = existing
             prior = state
+            // Decrypted attachments an export from an encrypted backup left when it ended
+            // abruptly (a crash, the Mac turned off): removed before anything else, so no
+            // plaintext copy lingers in the archive (2026-11-03).
+            try? FileManager.default.removeItem(at: Self.extractFolder(root))
         } else {
             root = try ArchiveNaming.newFolder(request.archiveName, in: request.destination)
             prior = nil
@@ -53,7 +57,7 @@ public enum ArchiveWriter {
             // An encrypted backup's attachments are decrypted inside the archive, each removed
             // once it is copied, and the folder when the export ends.
             if readers[i].engine.backupKey != nil {
-                let extract = root.appendingPathComponent(".messagearchiver/extract")
+                let extract = Self.extractFolder(root)
                 try FileManager.default.createDirectory(at: extract, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 session.extractFolder = extract
                 arguments += ["--extract-to", extract.path]
@@ -82,8 +86,16 @@ public enum ArchiveWriter {
         if !stopped, !failed.isEmpty, failed.count == readers.filter({ $0.arguments != nil }).count, let first = failed.values.first {
             throw first.error
         }
-        return try await session.finish(stopped: stopped || Task.isCancelled, hashes: await hashes.value,
-                                        failed: failed.mapValues(\.reason))
+        var result = try await session.finish(stopped: stopped || Task.isCancelled, hashes: await hashes.value,
+                                              failed: failed.mapValues(\.reason))
+        // A rebuilt archive takes the old one's place once it is whole: the old one to the Trash.
+        if let old = request.replacing, !result.stopped, result.failedSources.isEmpty {
+            try request.trash.discard(old)
+            try FileManager.default.moveItem(at: result.root, to: old)
+            result.root = old
+            result.replaced = true
+        }
+        return result
     }
 
     /// One source being read: its engine, what it is given, and where its next update starts.
@@ -224,11 +236,18 @@ public enum ArchiveWriter {
 
 public enum UpdateError: Error, Equatable, LocalizedError {
     case notAnArchive(String)
+    case earlierVersion(name: String, version: String)
     case otherSource(String)
+
+    /// Why a folder can't be used as an archive: made by an earlier version, or not one.
+    public static func refusing(_ root: URL) -> UpdateError {
+        ArchiveState.earlier(root).map { .earlierVersion(name: root.lastPathComponent, version: $0.version) } ?? .notAnArchive(root.path)
+    }
 
     public var errorDescription: String? {
         switch self {
         case .notAnArchive(let path): "\(path) isn’t a MessageArchiver archive (it has no .messagearchiver/state.json), so it can’t be updated."
+        case .earlierVersion(let name, let version): "“\(name)” was made by MessageArchiver \(version), which this version doesn’t update or add to. Choose File ▸ Update Archive… to rebuild it."
         case .otherSource(let path): "This archive was made from another Messages database (\(path)), so it can’t be updated from this one."
         }
     }
@@ -287,6 +306,11 @@ final class LineQueue: @unchecked Sendable {
 /// One export in progress. The engines hand it messages one at a time, merged in date order,
 /// on one thread; attachment work runs on a queue beside it.
 extension ArchiveWriter {
+    /// Where an encrypted backup's attachments are decrypted during an export, inside the archive.
+    static func extractFolder(_ root: URL) -> URL {
+        root.appendingPathComponent(ArchiveState.folder).appendingPathComponent("extract")
+    }
+
     static func kind(_ name: String) -> RenderedAttachment.Kind {
         switch name {
         case "image": .image
@@ -299,26 +323,9 @@ extension ArchiveWriter {
     /// What an earlier run recorded an attachment under: its guid. One without (another
     /// source's, WhatsApp's media row) is named by its source, number and file name, so two
     /// sources' "5", or a reinstalled app's, are never taken for one file (audit W3).
-    /// Messages keeps 1.0's `id:<n>`.
     static func key(_ a: ExportMessage.Attachment, source: SourceID) -> String {
         if let guid = a.guid { return guid }
-        if source == .messages { return "id:\(a.id)" }
         return "\(source.rawValue):\(a.id):\(a.filename ?? a.path.map { ($0 as NSString).lastPathComponent } ?? "")"
-    }
-
-    /// The earlier run's record of this attachment. An archive made before W3 recorded another
-    /// source's under `id:<n>`: that one counts only when its file carries this attachment's
-    /// name, and is then recorded under the new key too.
-    static func recorded(_ a: ExportMessage.Attachment, source: SourceID,
-                         in attachments: inout [String: ArchiveState.Attachment]) -> ArchiveState.Attachment? {
-        let key = key(a, source: source)
-        if let known = attachments[key] { return known }
-        guard a.guid == nil, source != .messages, let old = attachments["id:\(a.id)"],
-              let name = a.filename ?? a.path.map({ ($0 as NSString).lastPathComponent }),
-              let file = old.original ?? old.primary,
-              file.contains((fileName(name) as NSString).deletingPathExtension) else { return nil }
-        attachments[key] = old
-        return old
     }
 
     /// An attachment's own name in the archive. With the stamp, the conversation's folder (at
@@ -525,7 +532,7 @@ private final class Session: @unchecked Sendable {
     func plan(_ a: ExportMessage.Attachment, message m: ExportMessage, thread: ExportThread, source sourceID: SourceID) -> RenderedAttachment {
         let filename = a.filename ?? (a.path.map { ($0 as NSString).lastPathComponent } ?? "attachment")
         // Under the lock: the copy queue changes these records too (audit 2026-11-01, H5).
-        if let known = lock.withLock({ ArchiveWriter.recorded(a, source: sourceID, in: &attachments) }), let primary = known.primary,
+        if let known = lock.withLock({ attachments[ArchiveWriter.key(a, source: sourceID)] }), let primary = known.primary,
            ArchiveState.file(primary, in: root) != nil {
             return RenderedAttachment(kind: ArchiveWriter.kind(known.kind), filename: filename, size: a.size,
                                       primary: "../" + primary, original: known.original.map { "../" + $0 })
@@ -766,7 +773,7 @@ private final class Session: @unchecked Sendable {
         // A conversation already in the archive that this run couldn't write in full stays as
         // it was, files, record and search entries (audit H7, H8): an update that was stopped
         // holds only its oldest messages, and one with fewer messages than the archive had has
-        // lost some (an archive made before the message store can't add them back).
+        // lost some its message store can't add back (the store damaged or removed).
         // What was lost is told by GUID, from the search index's entries for it, so one message
         // lost and another added is seen; by count when the index can't say.
         var keep: [ThreadRef: String] = [:]
@@ -778,7 +785,7 @@ private final class Session: @unchecked Sendable {
                 keep[id] = "“\(thread.title)” was left as it was: the update was stopped before it finished."
             } else if lost > 0 {
                 keep[id] = "“\(thread.title)” was left as it was: its sources no longer hold \(Plural.count(lost, "message")) it has, "
-                    + "and this archive, made by an earlier version, has no copy of \(lost == 1 ? "it" : "them") to add back. "
+                    + "and this archive’s own copy of its messages is missing, so \(lost == 1 ? "it" : "they") can’t be added back. "
                     + "Nothing was removed. A new archive includes the latest messages."
             }
         }
@@ -803,7 +810,7 @@ private final class Session: @unchecked Sendable {
         for writer in writers {
             try writer.finish(threads: written, stats: stats, footer: footer)
         }
-        let priorParts = Dictionary((prior?.threads ?? []).compactMap { t in t.explorer.map { (t.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        let priorParts = Dictionary((prior?.threads ?? []).map { ($0.id, $0.explorer) }, uniquingKeysWith: { a, _ in a })
         explorerParts = try explorer.finish(threads: written, prior: priorParts)
         try finishStore(written)
         lock.withLock {
@@ -868,21 +875,9 @@ private final class Session: @unchecked Sendable {
         }
     }
 
-    /// Each archived transcript's exhibit letter: from the state, or, for an archive made before
-    /// it kept them, from the transcript's own page ("Exhibit B-0001"). One with no exhibits
-    /// has none to keep.
+    /// Each archived transcript's exhibit letter.
     func exhibitLetters() -> [ThreadRef: String] {
-        var letters: [ThreadRef: String] = [:]
-        for t in prior?.threads ?? [] where t.bates != nil {
-            if let kept = t.bates?.letter {
-                letters[t.id] = kept
-            } else if let page = t.files["transcript_html"].flatMap({ ArchiveState.file($0, in: root) }),
-                      let text = try? String(contentsOf: page, encoding: .utf8),
-                      let match = text.firstMatch(of: /Exhibit ([A-Z]+)-[0-9]{4}/) {
-                letters[t.id] = String(match.1)
-            }
-        }
-        return letters
+        Dictionary((prior?.threads ?? []).compactMap { t in t.bates.map { (t.id, $0.letter) } }, uniquingKeysWith: { a, _ in a })
     }
 
     func mergedRecords(_ written: [ExportThread]) -> [ArchiveState.Thread] {
@@ -908,7 +903,7 @@ private final class Session: @unchecked Sendable {
                 personIds: Array(Set(t.participants.compactMap(\.personId))).sorted(),
                 missing: missingIn[t.id] ?? [], keptOriginal: kept, notCopied: notCopied,
                 parts: t.parts.count > 1 ? t.parts : nil, incomplete: isIncomplete(t) ? true : nil,
-                explorer: explorerParts[t.id] ?? byId[t.id]?.explorer)
+                explorer: explorerParts[t.id] ?? byId[t.id]?.explorer ?? 0)
         }
         // By title; two of one name (two "Maya Chen") by id, so every export lists them alike.
         return byId.values.sorted {
@@ -977,10 +972,13 @@ private final class Session: @unchecked Sendable {
         let noted = try writeNotes(records, footer: footer)
         let line = HTML.escape(summary(records))
         let name = prior?.archiveName ?? request.archiveName
-        var header = "<h1>\(HTML.escape(name))</h1>\n<p>\(line)</p>"
+        // The archive's details (2026-11-03): the Message Explorer is its front door; this page
+        // is the record, and the way in without JavaScript.
+        var header = "<h1>\(HTML.escape(name))</h1>\n<p class=\"index_role\">Archive details · "
+            + "<a href=\"\(Explorer.page)\"><b>Open the Message Explorer</b></a>: people and conversations, as in a messaging app</p>"
+        header += "\n<p>\(line)</p>"
         header += "\n<p>Read from: \(HTML.escape(readFrom.joined(separator: " · ")))</p>"
         if let noted { header += "\n<p>\(noted)</p>" }
-        header += "\n<p><a href=\"\(Explorer.page)\">Open the Message Explorer</a>: people and conversations, as in a messaging app</p>"
         // Typing narrows the list: a few lines of script, in the page, no network.
         if records.count > 1 {
             header += "\n<p class=\"index_filter\"><input type=\"search\" id=\"filter\" placeholder=\"Find a conversation\" aria-label=\"Find a conversation\"></p>"
@@ -997,7 +995,7 @@ private final class Session: @unchecked Sendable {
             let css = root.appendingPathComponent(stylesheet)
             if (try? String(contentsOf: css, encoding: .utf8)) != style.css { try placeAndCount(Data(style.css.utf8), css) }
         }
-        let page = style.pageHead(title: name, stylesheet: stylesheet, header: header) + body + style.pageFoot(footer: footer)
+        let page = style.pageHead(title: "\(name) — Archive details", stylesheet: stylesheet, header: header) + body + style.pageFoot(footer: footer)
         try placeAndCount(Data(page.utf8), root.appendingPathComponent("index.html"))
     }
 
@@ -1034,7 +1032,7 @@ private final class Session: @unchecked Sendable {
             let range = [renderer.minute(t.first), renderer.minute(t.last)].filter { !$0.isEmpty }.joined(separator: " → ")
             return ["key": Explorer.key(t.id), "title": t.title, "group": t.isGroup, "sources": sourceNames(of: t).joined(separator: " + "),
                     "messages": t.messages, "attachments": t.attachments, "missing": t.missing.count,
-                    "last": orNull(t.last), "day": renderer.day(t.last), "range": range, "parts": t.explorer ?? 0,
+                    "last": orNull(t.last), "day": renderer.day(t.last), "range": range, "parts": t.explorer,
                     "people": t.personIds, "incomplete": t.incomplete ?? false,
                     "bates": t.bates.map { "Bates \($0.first) – \($0.last)" } ?? NSNull(),
                     "links": order.compactMap { f in t.files[f.key].map { ["label": f.label, "path": $0] } }]
@@ -1127,7 +1125,7 @@ private final class Session: @unchecked Sendable {
             body += "</ul>\n"
         }
         let stylesheet = writers.contains(where: { $0.format == .html }) ? "Conversations/style.css" : "index.css"
-        let header = "<p><a href=\"index.html\">← Archive index</a></p>\n<h1>Attachment notes</h1>\n<p>\(HTML.escape(parts.isEmpty ? "Nothing to note" : parts.joined(separator: " · ")))</p>"
+        let header = "<p><a href=\"index.html\">← Archive details</a></p>\n<h1>Attachment notes</h1>\n<p>\(HTML.escape(parts.isEmpty ? "Nothing to note" : parts.joined(separator: " · ")))</p>"
         let html = style.pageHead(title: "Attachment notes", stylesheet: stylesheet, header: header) + body + style.pageFoot(footer: footer)
         try placeAndCount(Data(html.utf8), url)
         return parts.isEmpty ? nil : "\(HTML.escape(parts.joined(separator: " · "))) · <a href=\"\(Self.notesPage)\">Attachment notes</a>"
@@ -1235,7 +1233,7 @@ private final class Session: @unchecked Sendable {
         // A stopped run hasn't covered everything up to here, nor has a source that failed: the
         // next update starts, for each, where its last complete run did. Sources this run
         // didn't read keep theirs.
-        var sources = prior?.allSources ?? []
+        var sources = prior?.sources ?? []
         for (i, r) in readers.enumerated() where i == 0 || r.arguments != nil {
             let before = prior?.source(r.id)
             let complete = !stopped && failed[r.id] == nil && r.maxRowid != nil
@@ -1248,7 +1246,8 @@ private final class Session: @unchecked Sendable {
         sources.sort { $0.id < $1.id }
         let state = ArchiveState(
             archiveName: prior?.archiveName ?? request.archiveName, created: prior?.created ?? exportedISO,
-            sources: sources, choice: choice, options: prior?.options ?? request.options,
+            // An update is given the archive's own options (with a transcript, once one is added).
+            sources: sources, choice: choice, options: request.options,
             nextBates: lastBates.map { $0 + 1 } ?? prior?.nextBates,
             threads: records, attachments: attachments, runs: (prior?.runs ?? []) + [run])
         try state.write(root)

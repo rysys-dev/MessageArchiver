@@ -14,7 +14,7 @@ extension AppState {
         panel.message = "Choose an archive MessageArchiver made, to read the text in its photos and voice notes."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard ArchiveState.read(url) != nil else {
-            inform("This folder isn’t an archive", UpdateError.notAnArchive(url.path).localizedDescription)
+            inform("This folder can’t be read", UpdateError.refusing(url).localizedDescription)
             return
         }
         readText(url)
@@ -58,7 +58,7 @@ struct TextReadSheet: View {
                       : o.withText == 0 ? "No text found in its \(o.files.formatted()) photos and voice notes."
                       : "Text found in \(o.withText.formatted()) of \(o.files.formatted()) photos and voice notes.",
                       systemImage: "checkmark.circle.fill")
-                Text("Search finds it, marked as read by this Mac, and JSON/recognized.json lists it when the archive has JSON. Transcripts and pages don’t change. From now on, this archive’s updates read new photos and voice notes too.")
+                Text("Search finds it, marked as read by this Mac, and JSON/recognized.json lists it when the archive has JSON. \(state.legalTools ? "Transcripts and pages don’t" : "Its pages don’t") change. From now on, this archive’s updates read new photos and voice notes too.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

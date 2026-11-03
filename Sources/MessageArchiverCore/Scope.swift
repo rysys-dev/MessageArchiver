@@ -106,7 +106,7 @@ public struct PlatformFilter: Sendable, Equatable, Hashable {
 
     public var isAll: Bool { hidden.isEmpty }
 
-    /// A day or message with no service named (an engine from before Milestone 14) always counts.
+    /// A day or message with no service named (a source that names none) always counts.
     public func matches(_ service: String?) -> Bool { service.map { !hidden.contains($0) } ?? true }
 
     /// What the engine and the archive are given: the ticked services among those present,

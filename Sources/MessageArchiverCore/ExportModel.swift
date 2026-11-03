@@ -140,6 +140,9 @@ public struct ExportRequest: Sendable {
     /// changed, and `newMessages` how many messages are new.
     public var update: URL?
     public var newMessages = 0
+    /// An archive made by an earlier version, made again (decision 2026-11-03): the new one is
+    /// written beside it and, once whole, takes its folder; the old one goes to the Trash.
+    public var replacing: URL?
     /// Where files an update replaces go (decision Q7).
     public var trash: TrashCan = .standard()
 
@@ -218,6 +221,8 @@ public struct ExportResult: Sendable {
     /// Messages an update kept from the archive because their sources no longer hold them
     /// (audit H7): Messages keeping only a year, a message deleted on the phone.
     public var keptFromArchive = 0
+    /// It replaced an archive made by an earlier version (`ExportRequest.replacing`).
+    public var replaced = false
     /// Photos and voice notes whose text was read (Milestone 26), and why any weren't.
     public var recognized = 0
     public var recognitionNote: String?

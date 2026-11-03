@@ -31,8 +31,7 @@ public struct SourceID: RawRepresentable, Codable, Hashable, Comparable, Sendabl
 
 /// A conversation, named by its source and the source's number for it.
 ///
-/// Stored as a plain number for Messages (as version 1.0 stored every thread) and as
-/// `"<source>:<number>"` for the others, so an archive written now still reads in 1.0.
+/// Stored as a plain number for Messages and as `"<source>:<number>"` for the others.
 public struct ThreadRef: Hashable, Comparable, Sendable, Codable, CustomStringConvertible {
     public var source: SourceID
     public var id: Int

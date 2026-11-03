@@ -53,6 +53,8 @@ struct SettingsView: View {
                 Text("It’s a copy of your messages’ text that lets the dashboard search what’s said. It goes to the Trash, and is made again the next time you choose what to export.")
             }
             Divider()
+            LegalToolsSection()
+            Divider()
             AutomaticUpdatesSection()
             Divider()
             SourcesSection().id("sources")
@@ -153,6 +155,27 @@ struct SettingsView: View {
 
 /// Settings ▸ Automatic Updates (Milestone 25): how often, which archives, and what each
 /// one's last scheduled update did.
+/// Settings ▸ Legal tools (decision 2026-11-03): off, MessageArchiver is a plain archiver.
+private struct LegalToolsSection: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        @Bindable var state = state
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $state.legalTools) {
+                Text("Legal tools").font(.headline)
+            }
+            .toggleStyle(.switch)
+            Text(state.legalTools
+                 ? "Export offers a legal transcript (PDF and HTML) with Bates numbers; Search makes exhibits of chosen messages, with redaction; File ▸ Add Legal Transcripts… adds transcripts to an archive you already have."
+                 : "For a court or a lawyer: legal transcripts with Bates numbers, and exhibits of chosen messages with redaction. Off, none of it is shown. Archives that have transcripts keep them, and their updates keep them current.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 private struct AutomaticUpdatesSection: View {
     @Environment(AppState.self) private var state
     @Environment(\.palette) private var palette

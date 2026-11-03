@@ -96,7 +96,8 @@ struct StartView: View {
         StartLayout {
             CardHeading(symbol: state.backup == nil ? "bubble.left.and.text.bubble.right" : "iphone",
                         title: state.backup.map { "Messages from “\($0.deviceName)”" } ?? "Your Messages on this Mac",
-                        detail: "Export conversations and their attachments as web pages, a legal transcript, Markdown and JSON.")
+                        detail: state.legalTools ? "Export conversations and their attachments as web pages, a legal transcript, Markdown and JSON."
+                            : "Export conversations and their attachments as web pages, Markdown and JSON.")
             SourceMenu()
             if state.fullDiskAccess == .noDatabase && state.backup == nil {
                 Text("There’s no Messages history on this Mac yet.")

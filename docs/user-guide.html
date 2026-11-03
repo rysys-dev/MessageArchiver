@@ -56,7 +56,7 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; what came after is described below: <a href="#exhibits">exhibits of chosen messages</a> (1.3.1), and in 1.3.2 their <a href="#redaction">redaction</a>, <a href="#automatic-updates">automatic updates</a> and <a href="#text-in-photos">text in photos and voice notes</a>.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; what came after is described below: <a href="#exhibits">exhibits of chosen messages</a> (1.3.1), in 1.3.2 their <a href="#redaction">redaction</a>, <a href="#automatic-updates">automatic updates</a> and <a href="#text-in-photos">text in photos and voice notes</a>, and in 1.4.0 the <a href="#legal-tools">Legal tools</a> switch, the <a href="#explorer">Message Explorer</a> as each archive's front page, and <a href="#update">rebuilding archives from earlier versions</a>.</p>
 
 <nav aria-label="Contents">
   <ol>
@@ -70,6 +70,7 @@ th { color: var(--muted); font-weight: 600; }
     <li><a href="#update">Update an archive</a></li>
     <li><a href="#verify">Verify an archive</a></li>
     <li><a href="#search">Search an archive</a></li>
+    <li><a href="#legal-tools">Legal tools</a></li>
     <li><a href="#exhibits">Exhibits of chosen messages</a></li>
     <li><a href="#iphone">iPhone backups</a></li>
     <li><a href="#plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</a></li>
@@ -128,7 +129,7 @@ th { color: var(--muted); font-weight: 600; }
   <tr><td>Conversation pages (HTML)</td><td>Looks like Messages, with photos and videos in place. Opens in any browser. Your own messages carry the name set for transcripts (and the number or email they were sent from, when Messages records it); in a conversation over several apps, each message says how it was sent.</td></tr>
   <tr><td>Markdown</td><td>Plain text, one file per conversation: for reading, or to give an AI assistant.</td></tr>
   <tr><td>JSON</td><td>Structured data for research and other software.</td></tr>
-  <tr><td>Legal transcript (PDF and HTML)</td><td>Numbered entries, attachments listed as exhibits with their SHA-256, Bates numbers and Page X of Y. Add the matter, who prepared it and for whom; they go on the cover page.</td></tr>
+  <tr><td>Legal transcript (PDF and HTML)</td><td>With <a href="#legal-tools">Legal tools</a> on. Numbered entries, attachments listed as exhibits with their SHA-256, Bates numbers and Page X of Y. Add the matter, who prepared it and for whom; they go on the cover page.</td></tr>
 </table></div>
 <ul>
   <li><strong>Attachments:</strong> a folder for each person or group, or all in one folder.</li>
@@ -141,9 +142,9 @@ th { color: var(--muted); font-weight: 600; }
 <p>Each export is a new folder; nothing already on the disk is replaced.</p>
 <div class="table-wrap"><table>
   <tr><th>Item</th><th>What it holds</th></tr>
-  <tr><td><code>index.html</code></td><td>Start here: what was read, and every conversation with its counts, its sources (Messages, Signal…), its dates and links to each format. Type in its box to find a conversation.</td></tr>
-  <tr><td><code>explorer.html</code></td><td>The <a href="#explorer">Message Explorer</a>: people and conversations, as in a messaging app. Its files are in <code>Explorer/</code>.</td></tr>
-  <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the index. Only when there are some.</td></tr>
+  <tr><td><code>explorer.html</code></td><td>Start here: the <a href="#explorer">Message Explorer</a>, people and conversations, as in a messaging app. Its files are in <code>Explorer/</code>.</td></tr>
+  <tr><td><code>index.html</code></td><td>The archive's details: what was read, and every conversation with its counts, its sources (Messages, Signal…), its dates and links to each format. Type in its box to find a conversation. It works in any browser, even one with JavaScript turned off, which the Explorer needs.</td></tr>
+  <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the archive details. Only when there are some.</td></tr>
   <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
   <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
   <tr><td><code>Exhibits/</code></td><td><a href="#exhibits">Exhibits of chosen messages</a>, PDF and HTML, one file per version, and an unredacted copy beside a redacted one. Only once you make one.</td></tr>
@@ -156,16 +157,17 @@ th { color: var(--muted); font-weight: 600; }
 <p><strong>Missing attachments</strong> are ones the messages name but whose file wasn't where they were read from (for Messages, on the Mac); they're listed in <code>attachment-notes.html</code>, and each conversation's count in the index links there. With Messages in iCloud, older attachments can stay in iCloud: open the conversation in Messages to download them, then export again.</p>
 
 <h2 id="explorer">Message Explorer</h2>
-<p>Every archive has a Message Explorer, <code>explorer.html</code>: the archive browsed like a messaging app, in any browser, offline. Open it with <strong>Message Explorer</strong> when an export finishes, from the link at the top of the archive's index, or by double-clicking it in the archive folder.</p>
+<p>Every archive has a Message Explorer, <code>explorer.html</code>: the archive browsed like a messaging app, in any browser, offline. Open it with <strong>Message Explorer</strong> when an export finishes, from the link at the top of the archive details (<code>index.html</code>), or by double-clicking it in the archive folder.</p>
 <ul>
   <li><strong>Conversations</strong> lists every conversation, the most recent first. Click one to read it on the right: it opens on its latest messages, with a line for each day; <strong>Show earlier messages</strong> goes further back. Links above it open its page, transcript, Markdown or JSON.</li>
   <li><strong>People</strong> lists everyone in the archive with their phone numbers and emails. Click a person to see all of them and every conversation they're in, groups included.</li>
   <li>Type in the box to find a name, a number or an email; the up and down arrow keys move through the list.</li>
 </ul>
-<p>It shows what the archive holds: export everything to see everything. An archive made by an earlier version gains a Message Explorer when it's updated; a conversation that wasn't rebuilt then links to its page instead. To find words said, use <a href="#search">Search an archive</a>.</p>
+<p>It shows what the archive holds: export everything to see everything. To find words said, use <a href="#search">Search an archive</a>.</p>
 
 <h2 id="update">Update an archive</h2>
 <p><span class="menu">File › Update Archive…</span> (<kbd>⇧⌘U</kbd>), or <strong>Update an existing archive…</strong> on the dashboard, adds what's new since the archive was made, with the same choices. Only conversations with new or edited messages are rebuilt. An update never loses a message the archive has: one Messages (or another source) no longer holds, because it keeps messages for a year or a message was deleted on the phone, stays in the archive. The files it replaces go to the Trash (or, on a drive without one, to a <code>RYSYS Trash</code> folder on that drive). An update you stop leaves the conversations already in the archive as they were.</p>
+<p><strong>Archives from earlier versions.</strong> MessageArchiver updates, searches and adds to archives first made by version <strong>1.3.1 or later</strong> (the support floor). An archive made by 1.3.0 or earlier isn't updated. Choosing it offers to <strong>rebuild</strong> it: it's made again from Messages with the same conversations, dates and formats, takes the old archive's folder once it's complete, and the old archive goes to the Trash, with any exhibits made from it.</p>
 
 <h3 id="automatic-updates">Automatic updates</h3>
 <p>In <span class="menu">MessageArchiver › Settings…</span>, under <strong>Automatic updates</strong>, choose <strong>Daily</strong> or <strong>Weekly</strong> and <strong>Add Archive…</strong> for each archive to keep current. Around 12:30 or 20:30 (or when the Mac next wakes, if it slept through), MessageArchiver opens hidden, updates them as above, and quits; if it's already open, it does the same in place. You get a notification only when something needs you, such as an archive whose drive isn't connected; Settings shows what each archive's last update added. This matters if Messages keeps messages for only a year or 30 days: an archive kept current has them before they go. The first time, macOS may ask you to allow MessageArchiver under <span class="menu">System Settings › General › Login Items &amp; Extensions</span>. Archives made from an iPhone backup aren't updated this way.</p>
@@ -176,8 +178,12 @@ th { color: var(--muted); font-weight: 600; }
 <h2 id="search">Search an archive</h2>
 <p><span class="menu">File › Search an Archive…</span> (<kbd>⇧⌘F</kbd>) finds any message in an archive. Type words in any order (accents and case don't matter; put a phrase in quotes), and narrow by person, conversation, dates or attachments. Click a result to see it in its conversation, outlined.</p>
 
+<h2 id="legal-tools">Legal tools</h2>
+<p>Legal transcripts, Bates numbers and exhibits are for a court or a lawyer, so they're hidden until you turn on <strong>Legal tools</strong> in <span class="menu">MessageArchiver › Settings…</span>. Off, Export offers no transcript and Search makes no exhibits. An archive that already has transcripts keeps them either way, and its updates keep them current.</p>
+<p>To give an archive made without them transcripts, choose <span class="menu">File › Add Legal Transcripts…</span>. Every conversation is written again with a transcript, using the transcript fields in Export (matter, names, Bates numbers); messages Messages no longer has are taken from the archive's own copy, so nothing the archive held is left out. The files it replaces go to the Trash, and from then on the archive's updates keep its transcripts current.</p>
+
 <h2 id="exhibits">Exhibits of chosen messages</h2>
-<p>An exhibit is a short transcript of only the messages you pick from one conversation, for a filing or a letter, instead of the whole conversation. It is taken from the conversation's legal transcript, so the archive must have one (choose <strong>Legal transcript</strong> when you export).</p>
+<p>An exhibit is a short transcript of only the messages you pick from one conversation, for a filing or a letter, instead of the whole conversation. It is taken from the conversation's legal transcript, so <a href="#legal-tools">Legal tools</a> must be on and the archive must have transcripts.</p>
 <ol>
   <li>In <span class="menu">File › Search an Archive…</span>, find a message of the conversation and click <strong>New Exhibit…</strong>.</li>
   <li>Tick the messages you want (Shift-click ticks a run), and give the exhibit a name, such as "Exhibit 3 – rent messages".</li>
@@ -188,7 +194,6 @@ th { color: var(--muted); font-weight: 600; }
 <h3 id="redaction">Redaction</h3>
 <p>In the exhibit window, under <strong>Redactions</strong>, type words or a phone number to black out everywhere in the exhibit (its cover and sender names included; a phone number is found however it is written), choose a reason (Personal information, Privileged, Not relevant, or your own), and click <strong>Redact</strong>. Right-click a message to redact its text or its attachments. <strong>Tick All</strong> makes a redacted copy of the whole conversation.</p>
 <p>The exhibit shows a black box in place of each, labelled with its number and reason where it fits, and ends with a redaction log: what kind of thing each one hid, where, and why, never the words themselves. The hidden text is removed from the file, not covered over, so it can't be copied or searched. Beside it, <code>&lt;name&gt; v1 (unredacted).pdf</code> has the same pages and Bates numbers, with what the other hides highlighted in pink and UNREDACTED COPY on every page, for a judge's review or your own files; send it only if you mean to. The archive's own transcript is never redacted.</p>
-<p>A transcript made by MessageArchiver 1.3.0 or earlier didn't keep what an exhibit needs. The first time you make an exhibit from one, MessageArchiver offers to <strong>rebuild the transcript</strong> from the archive: the same messages, with the archive's next Bates numbers. The old transcript stays beside it, its name ending "(made &lt;date&gt;)", so numbers already sent out still point to the same pages.</p>
 
 <h3 id="text-in-photos">Text in photos and voice notes</h3>
 <p>Tick <strong>Read text in photos and voice notes</strong> when you export, and search also finds words in the photos (a receipt's total, a screenshot, a sign) and in what voice notes say. It's done on your Mac by macOS itself; nothing is sent anywhere, and a voice note in a language your Mac can't read on its own is skipped, with a note saying so. A result found this way says "Found in a photo or voice note, as read by this Mac", since it's not what was sent and may contain mistakes. The text is also in <code>JSON/recognized.json</code>, never in the conversation pages or transcripts. It's off unless you choose it, because the first export takes longer; updates read only new files. The first time, macOS asks to allow Speech Recognition for voice notes.</p>
@@ -226,6 +231,7 @@ th { color: var(--muted); font-weight: 600; }
 <ul>
   <li><strong>Permissions:</strong> Full Disk Access and Contacts, with Check Again.</li>
   <li><strong>Search index:</strong> its size and when it was updated; <strong>Update Now</strong>, or <strong>Delete…</strong> to move it to the Trash (it's made again when needed).</li>
+  <li><strong>Legal tools:</strong> off unless you turn them on; see <a href="#legal-tools">Legal tools</a>.</li>
   <li><strong>Sources:</strong> Messages and each plug-in, with what it reads; <strong>Instructions</strong>, <strong>Remove…</strong>, <strong>Install Plug-in…</strong>, and the plug-ins' page.</li>
   <li><strong>Converters:</strong> what converts photos, audio and video. <code>sips</code> and <code>afconvert</code> come with macOS; <code>ffmpeg</code> is optional.</li>
   <li><strong>Appearance and skin:</strong> light, dark or automatic, and the app's colours. Skins are small JSON files you can export, edit and import.</li>

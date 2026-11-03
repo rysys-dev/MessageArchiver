@@ -167,15 +167,12 @@ app does the same and also reports files added since.
 ## `.messagearchiver/state.json` (the archive's own record)
 
 Not part of the export or the manifest: MessageArchiver's bookkeeping for **Update Archive**
-(spec §11). It holds the archive's name and when it was made; the source database and device;
+(spec §11). It holds the archive's name and when it was made;
 what was chosen (`choice`: every conversation, or these ids; the dates; the Contacts filter;
 `services`, the Platform filter, null for all, so an update exports the same platforms);
-the export settings; `last_rowid` and `last_run_started` (where the next update starts from
-Messages); `sources[]` (version 2, Milestone 13: each source's `id`, `path`, `device`,
-`position` and `run_started`, so each source updates from its own cursor; a source that failed
-keeps its last complete run's; a version-1 file
-without it is one Messages source, and version 2 keeps the version-1 fields for Messages so
-MessageArchiver 1.0 can still update the archive); `choice.threads` and `threads[].id` are
+the export settings; `sources[]` (each source's `id`, `path`, `device`, `position` and
+`run_started`, so each source updates from its own cursor; a source that failed keeps its last
+complete run's); `choice.threads` and `threads[].id` are
 numbers for Messages and `"<source>:<id>"` for other sources; `threads[].parts` (one person's
 threads in several sources, Milestone 16) and `threads[].incomplete` (a source it draws on failed;
 the next update rebuilds it);

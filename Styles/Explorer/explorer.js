@@ -260,7 +260,7 @@ const MA = (() => {
         $('ex-main').replaceChildren(head, scroll);
 
         if (!c.parts) {
-            const note = el('div', 'ex_notice', 'This conversation was written into the archive before it had a Message Explorer, so its messages are only on its own page.');
+            const note = el('div', 'ex_notice', 'This conversation’s messages are only on its own page.');
             const page = c.links[0];
             if (page) {
                 const a = el('a', 'ex_link', ` Open ${page.label.toLowerCase()}`);

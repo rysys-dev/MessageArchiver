@@ -121,6 +121,16 @@ final class AppState {
     }
     private(set) var skins: [Skin] = Skin.builtIn
     var skinName = Skin.standard.name { didSet { save() } }
+    /// Settings ▸ Legal tools: off, no transcript, Bates or exhibit is offered. An archive that
+    /// has transcripts keeps them either way, and its updates keep them current.
+    var legalTools = false { didSet { save() } }
+    /// What an export is given: without Legal tools, no transcript, whatever was ticked when
+    /// they were on (kept, for when they are on again).
+    var chosenOptions: ExportOptions {
+        var o = exportOptions
+        if !legalTools { o.formats.remove(.transcript) }
+        return o
+    }
     var skin: Skin { skins.first { $0.name == skinName } ?? .standard }
     private var contactsAsked = false
     private let skinStore = SkinStore()
@@ -160,6 +170,7 @@ final class AppState {
         destination = saved.destination.map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
         exportOptions = saved.exportOptions
+        legalTools = saved.legalTools
         exportFolders = Dictionary(uniqueKeysWithValues: saved.exportFolders.map { (SourceID(rawValue: $0.key), URL(fileURLWithPath: $0.value)) })
         if exportOptions.transcript.ownerName.isEmpty { exportOptions.transcript.ownerName = NSFullUserName() }
         skins = skinStore.all()
@@ -659,7 +670,7 @@ final class AppState {
         var request = ExportRequest(
             destination: destination, archiveName: name.isEmpty ? defaultArchiveName : name,
             threads: chosen, allThreads: selection == all,
-            from: days.from, to: days.to, options: exportOptions, names: handleNames,
+            from: days.from, to: days.to, options: chosenOptions, names: handleNames,
             source: source == AppPaths.messagesDatabase ? nil : source, expectedMessages: estimate.messages,
             people: exportPeople)
         request.backup = backup
@@ -747,12 +758,16 @@ final class AppState {
         updateError = nil
         guard let engine else { return }
         guard let state = ArchiveState.read(root) else {
-            inform("This folder can’t be updated", UpdateError.notAnArchive(root.path).localizedDescription)
+            if let earlier = ArchiveState.earlier(root) {
+                await offerRebuild(root, earlier)
+            } else {
+                inform("This folder can’t be updated", UpdateError.notAnArchive(root.path).localizedDescription)
+            }
             return
         }
         // Each source updates from its own database (Milestone 13): the one it was made from.
         guard let made = state.source(engine.sourceID), made.path == source.path else {
-            let other = state.source(engine.sourceID)?.path ?? state.allSources.first?.path ?? ""
+            let other = state.source(engine.sourceID)?.path ?? state.sources.first?.path ?? ""
             inform("This archive can’t be updated here", UpdateError.otherSource(other).localizedDescription)
             return
         }
@@ -788,7 +803,7 @@ final class AppState {
             let relevant = changes.filter { ids.contains($0.ref) }
             updatePlan = UpdatePlan(root: root, state: state, threads: wanted,
                                     newMessages: relevant.reduce(0) { $0 + $1.new }, edited: relevant.reduce(0) { $0 + $1.edited },
-                                    differences: state.differences(from: exportOptions, choice: currentChoice))
+                                    differences: state.differences(from: chosenOptions, choice: currentChoice))
         } catch {
             inform("Couldn’t look for changes", error.localizedDescription)
         }
@@ -809,6 +824,99 @@ final class AppState {
         request.others = exportSources
         request.services = plan.state.choice.services
         request.choice = plan.state.choice
+        run(request)
+    }
+
+    /// File ▸ Add Legal Transcripts… (Legal tools): an archive made without transcripts gains
+    /// them, so turning Legal tools on later loses nothing. It is an update that writes every
+    /// conversation again, from Messages and the archive's own copy of its messages (so one
+    /// Messages no longer holds is in the transcript too), with the transcript fields as they
+    /// are in Export now; the files it replaces go to the Trash.
+    func chooseArchiveForTranscripts() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = exportResult?.root ?? destination
+        panel.prompt = "Add Transcripts"
+        panel.message = "Choose an archive MessageArchiver made, to add a legal transcript of each conversation."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await addTranscripts(url) }
+    }
+
+    func addTranscripts(_ root: URL) async {
+        guard let engine else { return }
+        guard var archive = ArchiveState.read(root) else {
+            inform("This folder can’t be given transcripts", UpdateError.refusing(root).localizedDescription)
+            return
+        }
+        guard !archive.options.formats.contains(.transcript) else {
+            inform("“\(archive.archiveName)” already has legal transcripts", "Its updates keep them current: choose File ▸ Update Archive… to add what’s new.")
+            return
+        }
+        guard let made = archive.source(engine.sourceID), made.path == source.path else {
+            inform("This archive can’t be given transcripts here",
+                   UpdateError.otherSource(archive.source(engine.sourceID)?.path ?? archive.sources.first?.path ?? "").localizedDescription)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Add legal transcripts to “\(archive.archiveName)”?"
+        alert.informativeText = "Every conversation is written again, with a transcript (PDF and HTML) numbered from "
+            + "\(exportOptions.transcript.bates(max(1, exportOptions.transcript.batesStart))), using the transcript fields in Export. "
+            + "Messages no longer in Messages are taken from the archive’s own copy. The files it replaces go to the Trash, "
+            + "and from now on its updates keep the transcripts current."
+        alert.addButton(withTitle: "Add Transcripts")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if threads.isEmpty { await readMessages() }
+        archive.options.formats.insert(.transcript)
+        archive.options.transcript = exportOptions.transcript
+        let ids = Set(archive.threads.map(\.id))
+        let wanted = conversations.filter { ids.contains($0.id) }
+        runUpdate(UpdatePlan(root: root, state: archive, threads: wanted, newMessages: 0, edited: 0, differences: []))
+    }
+
+    /// An archive made by an earlier version isn't updated (decision 2026-11-03: no support for
+    /// earlier versions' archives for now): it can be made again, from the same Messages, with
+    /// what it chose as far as its record says. The new one takes its folder once whole; the old
+    /// one goes to the Trash, exhibits and all.
+    func offerRebuild(_ root: URL, _ earlier: ArchiveState.Earlier) async {
+        let name = root.lastPathComponent
+        if let made = earlier.source, made != source.path {
+            inform("This archive can’t be rebuilt here", UpdateError.otherSource(made).localizedDescription)
+            return
+        }
+        if quiet {
+            quietFailure = quietFailure ?? "“\(name)” was made by MessageArchiver \(earlier.version), which this version doesn’t update. Open MessageArchiver and update it to rebuild it."
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Rebuild “\(name)”?"
+        alert.informativeText = "It was made by MessageArchiver \(earlier.version), which this version doesn’t update. "
+            + "Rebuilding makes it again from Messages, with the same conversations, dates and formats. "
+            + "Once the new archive is complete it takes this folder, and the old archive goes to the Trash, with any exhibits made from it."
+        alert.addButton(withTitle: "Rebuild")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if threads.isEmpty { await readMessages() }
+        let choice = earlier.choice
+        let wanted = conversations.filter { c in
+            guard let choice else { return true }
+            if !choice.allThreads { return c.parts.contains(where: choice.threads.contains) }
+            guard let t = info(c.id) else { return false }
+            return !hasContactNames || choice.contactsFilter.matches(t) { personOfHandle[$0]?.inContacts == true }
+        }
+        var request = ExportRequest(
+            destination: root.deletingLastPathComponent(), archiveName: earlier.archiveName,
+            threads: wanted.map { exportThread($0, parts: $0.parts) },
+            allThreads: Set(wanted.flatMap(\.parts)) == Set(threads.map(\.ref)),
+            from: choice?.from, to: choice?.to, options: earlier.options ?? chosenOptions, names: handleNames,
+            source: source == AppPaths.messagesDatabase ? nil : source,
+            expectedMessages: wanted.reduce(0) { $0 + messages(in: $1) }, people: exportPeople)
+        request.replacing = root
+        request.backup = backup
+        request.others = exportSources
+        request.services = choice?.services
+        request.choice = choice
         run(request)
     }
 
@@ -981,6 +1089,7 @@ final class AppState {
         settings.contactsAsked = contactsAsked
         settings.destination = destination.path
         settings.exportOptions = exportOptions
+        settings.legalTools = legalTools
         settings.exportFolders = Dictionary(uniqueKeysWithValues: exportFolders.map { ($0.key.rawValue, $0.value.path) })
         try? SettingsStore.save(settings)
     }

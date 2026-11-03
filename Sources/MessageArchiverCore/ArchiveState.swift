@@ -3,12 +3,7 @@ import Foundation
 /// An archive's own record (spec §11), in `.messagearchiver/state.json`: what it holds, how it
 /// was made, and every run, so an update can add just what is new. Not in the manifest.
 public struct ArchiveState: Codable, Sendable, Equatable {
-    public struct Source: Codable, Sendable, Equatable {
-        public var path: String
-        public var device: String
-    }
-
-    /// One source the archive was made from, and where its next update starts (version 2).
+    /// One source the archive was made from, and where its next update starts.
     public struct SourceState: Codable, Sendable, Equatable {
         public var id: SourceID
         public var path: String
@@ -56,8 +51,8 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         public var last: String
         public var pages: Int
         /// Its exhibits' letter ("Exhibit B-0001"), kept so an update that rebuilds it uses the
-        /// same one (audit W2); nil in an archive made before it was kept.
-        public var letter: String? = nil
+        /// same one (audit W2).
+        public var letter: String
     }
 
     public struct Thread: Codable, Sendable, Equatable {
@@ -80,9 +75,8 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         /// A source it draws on couldn't be read in the run that wrote it; the next update
         /// rebuilds it.
         public var incomplete: Bool? = nil
-        /// How many parts its Message Explorer data has (Milestone 22); nil when it was written
-        /// before the Explorer existed.
-        public var explorer: Int? = nil
+        /// How many parts its Message Explorer data has (Milestone 22).
+        public var explorer: Int
     }
 
     /// Where an attachment went, so an update links to it instead of copying it again.
@@ -112,44 +106,29 @@ public struct ArchiveState: Codable, Sendable, Equatable {
     }
 
     public var format = "MessageArchiver archive state"
-    /// 2 since Milestone 13: `sources`. Version 1.0 of the app reads it still (it ignores the
-    /// number and `sources`), so `source`, `lastRowid` and `lastRunStarted` keep Messages'.
     public var version = 2
     public var archiveName: String
     public var created: String
-    /// Messages' source, as version 1 stored it.
-    public var source: Source
     public var choice: Choice
     public var options: ExportOptions
-    /// Messages' cursor, as version 1 stored it: the highest message rowid when the last run began.
-    public var lastRowid: Int64
-    /// When the last run began; edits and unsends after it are picked up by the next update.
-    public var lastRunStarted: String
-    /// Every source, each with its own cursor; nil in a version-1 state (see `allSources`).
-    public var sources: [SourceState]?
+    /// Every source, each with its own cursor.
+    public var sources: [SourceState]
     /// The next Bates number (transcripts carry on from here).
     public var nextBates: Int?
     public var threads: [Thread]
     public var attachments: [String: Attachment]
     public var runs: [Run]
 
-    /// Every source the archive was made from: a version-1 state's one source is Messages.
-    public var allSources: [SourceState] {
-        sources ?? [SourceState(id: .messages, path: source.path, device: source.device, position: lastRowid, runStarted: lastRunStarted)]
-    }
+    public func source(_ id: SourceID) -> SourceState? { sources.first { $0.id == id } }
 
-    public func source(_ id: SourceID) -> SourceState? { allSources.first { $0.id == id } }
+    /// The source the manifest names: Messages', else the first.
+    var sourcePath: String { (source(.messages) ?? sources.first)?.path ?? "" }
 
     public init(archiveName: String, created: String, sources: [SourceState], choice: Choice, options: ExportOptions,
                 nextBates: Int?, threads: [Thread], attachments: [String: Attachment], runs: [Run]) {
         self.archiveName = archiveName
         self.created = created
         self.sources = sources
-        let messages = sources.first { $0.id == .messages }
-        // An archive without Messages names no Messages source, so 1.0 refuses to update it.
-        source = Source(path: messages?.path ?? "", device: messages?.device ?? sources.first?.device ?? "")
-        lastRowid = messages?.position ?? 0
-        lastRunStarted = messages?.runStarted ?? created
         self.choice = choice
         self.options = options
         self.nextBates = nextBates
@@ -174,11 +153,56 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         return ArchiveWriter.isPlainFile(url, under: [ArchiveWriter.realPath(root.path)]) ? url : nil
     }
 
+    /// The archive's record; nil when the folder isn't an archive, or is one made by an
+    /// earlier version (`earlier`).
     public static func read(_ root: URL) -> ArchiveState? {
         guard let data = try? Data(contentsOf: url(root)) else { return nil }
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
-        return try? d.decode(ArchiveState.self, from: data)
+        guard let state = try? d.decode(ArchiveState.self, from: data),
+              PluginStore.compare(madeBy(state.runs.first?.appVersion), earliest) != .orderedAscending else { return nil }
+        return state
+    }
+
+    /// "1.3.2" from a run's "1.3.2 (c6ccf89)".
+    static func madeBy(_ appVersion: String?) -> String {
+        String(appVersion?.split(separator: " ").first ?? "")
+    }
+
+    /// The first version whose archives this one reads, updates and adds to. There is no
+    /// support for earlier ones' (decision 2026-11-03: no compatibility code while there
+    /// are no other users): such an archive is rebuilt instead (`ExportRequest.replacing`).
+    public static let earliest = "1.3.1"
+
+    /// An archive made by an earlier version: what it was called and chose, so it can be made
+    /// again the same way, as far as its record still says.
+    public struct Earlier: Sendable {
+        /// "1.2.0", or "an earlier version" when its record doesn't say.
+        public var version: String
+        public var archiveName: String
+        /// The Messages database it was made from, when its record names one.
+        public var source: String?
+        public var choice: Choice?
+        public var options: ExportOptions?
+    }
+
+    /// The folder holds an archive made by an earlier version; nil for one this version reads,
+    /// or a folder that isn't an archive.
+    public static func earlier(_ root: URL) -> Earlier? {
+        guard read(root) == nil, let data = try? Data(contentsOf: url(root)),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["format"] as? String == "MessageArchiver archive state" else { return nil }
+        let made = ((object["runs"] as? [[String: Any]])?.first?["app_version"] as? String).map { madeBy($0) }
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        func part<T: Decodable>(_ key: String, _ type: T.Type) -> T? {
+            object[key].flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { try? d.decode(T.self, from: $0) }
+        }
+        let messages = (object["sources"] as? [[String: Any]])?.first { $0["id"] as? String == SourceID.messages.rawValue }
+            ?? object["source"] as? [String: Any]
+        return Earlier(version: made ?? "an earlier version", archiveName: object["archive_name"] as? String ?? root.lastPathComponent,
+                       source: (messages?["path"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                       choice: part("choice", Choice.self), options: part("options", ExportOptions.self))
     }
 
     /// Written in place (atomically): it is the app's own bookkeeping, not part of the record.

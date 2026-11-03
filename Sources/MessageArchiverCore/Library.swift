@@ -74,7 +74,7 @@ public struct ActivityDay: Codable, Sendable, Hashable {
     public var threadId: Int?
     /// `YYYY-MM-DD`, local time.
     public var day: String
-    /// `iMessage`, `SMS`, `RCS`…: one line per service (Milestone 14); nil from an older engine.
+    /// `iMessage`, `SMS`, `RCS`…: one line per service (Milestone 14); nil from a source that names none.
     public var service: String?
     public var messages: Int
     public var attachments: Int

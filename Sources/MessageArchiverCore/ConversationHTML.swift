@@ -86,7 +86,7 @@ struct ConversationRenderer: Sendable {
             p.name.map { "\(HTML.escape($0)) (\(HTML.escape(p.handle)))" } ?? HTML.escape(p.handle)
         }.joined(separator: ", ")
         let from = sources.map { sourceNames[$0] ?? $0.rawValue }.joined(separator: " + ")
-        var out = "<nav class=\"back\"><a href=\"../index.html\">← Archive index</a></nav>\n"
+        var out = "<nav class=\"back\"><a href=\"../index.html\">← Archive details</a></nav>\n"
         out += "<h1>\(HTML.escape(title))</h1>\n"
         out += "<p>\([people, HTML.escape(from)].filter { !$0.isEmpty }.joined(separator: " · "))</p>\n"
         out += "<p>\(HTML.escape([Plural.count(stats.messages, "message"), Plural.count(stats.attachments, "attachment")].joined(separator: " · ")))</p>\n"

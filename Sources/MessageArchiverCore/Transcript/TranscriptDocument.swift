@@ -19,9 +19,6 @@ struct TranscriptDocument {
     let images = ImageCache()
     /// Set for an exhibit of chosen entries (Milestone 23): only those are shown.
     var exhibit: ExhibitLayout? = nil
-    /// A cover given whole, but for the Bates range: a transcript rebuilt from the archive
-    /// keeps the facts of the export that made it.
-    var fixedCover: [(String, String)]? = nil
     /// An exhibit's redactions (Milestone 24); `marked` makes the HTML the unredacted copy.
     var redactor: Redactor? = nil
     var marked = false
@@ -138,7 +135,7 @@ struct TranscriptDocument {
     }
 
     func coverLines(bates: String) -> [(String, String)] {
-        if let fixed = exhibit?.cover ?? fixedCover { return fixed + [("Bates range", bates)] }
+        if let fixed = exhibit?.cover { return fixed + [("Bates range", bates)] }
         let f = facts
         var tzName = f.timeZone.identifier
         let seconds = f.timeZone.secondsFromGMT(for: f.exported)
@@ -366,7 +363,7 @@ struct TranscriptDocument {
             <style>\(Self.css)</style>
             </head>
             <body>
-            <nav class="back"><a href="../index.html">← Archive index</a> · <a href="\(HTML.path(pdfName))">PDF (Bates \(HTML.escape(bates)))</a></nav>
+            <nav class="back"><a href="../index.html">← Archive details</a> · <a href="\(HTML.path(pdfName))">PDF (Bates \(HTML.escape(bates)))</a></nav>
             <h1>\(title)</h1>
             <table class="cover">
 

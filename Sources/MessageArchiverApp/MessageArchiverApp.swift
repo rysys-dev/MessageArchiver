@@ -47,6 +47,10 @@ struct MessageArchiverApp: App {
                     .disabled(state.isExporting)
                 Button("Read Text in Photos and Voice Notes…") { state.chooseAndReadText() }
                     .disabled(state.isExporting || state.textReadTask != nil)
+                if state.legalTools {
+                    Button("Add Legal Transcripts…") { state.chooseArchiveForTranscripts() }
+                        .disabled(state.isExporting || state.fullDiskAccess != .granted)
+                }
                 Divider()
                 Button("Install Plug-in…") { state.chooseAndInstallPlugin() }
                     .disabled(state.isExporting)

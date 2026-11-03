@@ -29,10 +29,12 @@ struct ExportSheet: View {
                     formatToggle(.html, "Conversation pages (HTML)", "Looks like Messages; opens in any browser.")
                     formatToggle(.markdown, "Markdown", "Plain text, one file per conversation: for reading, or for an AI assistant.")
                     formatToggle(.json, "JSON", "Structured data for research and other software, with people.json and archive.json.")
-                    formatToggle(.transcript, "Legal transcript (PDF and HTML)", "Numbered entries, exhibits with SHA-256, Bates numbers and Page X of Y; one per conversation.")
+                    if state.legalTools {
+                        formatToggle(.transcript, "Legal transcript (PDF and HTML)", "Numbered entries, exhibits with SHA-256, Bates numbers and Page X of Y; one per conversation.")
+                    }
                 }
             }
-            if state.exportOptions.formats.contains(.transcript) {
+            if state.chosenOptions.formats.contains(.transcript) {
                 TranscriptFields()
             }
             LabeledContent("Conversation style") {
@@ -60,15 +62,17 @@ struct ExportSheet: View {
                     .padding(.leading, 20)
                 Toggle("Keep the originals beside converted copies", isOn: $state.exportOptions.keepOriginals)
                     .disabled(!state.exportOptions.convertMedia)
-                Text("Recommended for a legal record: the original files, unchanged.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 20)
+                if state.legalTools {
+                    Text("Recommended for a legal record: the original files, unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 20)
+                }
                 Toggle("Read text in photos and voice notes", isOn: Binding(get: { state.exportOptions.recognizeText }, set: { on in
                     state.exportOptions.recognizeText = on
                     if on { Recognition.askForSpeech() }
                 }))
-                Text("So search finds a receipt’s total or what a voice note said. Read on this Mac, nothing sent anywhere; kept apart from what was sent, and never in transcripts. Makes the first export slower.")
+                Text("So search finds a receipt’s total or what a voice note said. Read on this Mac, nothing sent anywhere; kept apart from what was sent\(state.legalTools ? ", and never in transcripts" : ""). Makes the first export slower.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 20)
@@ -94,7 +98,7 @@ struct ExportSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(state.exportOptions.formats.isEmpty)
+                .disabled(state.chosenOptions.formats.isEmpty)
             }
             .padding(16)
         }
@@ -244,6 +248,10 @@ struct DoneView: View {
                         Text("\(Plural.count(r.trashed, "earlier file")) moved to the Trash")
                             .foregroundStyle(.secondary)
                     }
+                    if r.replaced {
+                        Text("Rebuilt: the archive made by an earlier version is in the Trash")
+                            .foregroundStyle(.secondary)
+                    }
                     if r.updated && r.keptFromArchive > 0 {
                         Text("\(Plural.count(r.keptFromArchive, "message")) no longer in Messages or the other sources kept from the archive")
                             .foregroundStyle(.secondary)
@@ -297,8 +305,8 @@ struct DoneView: View {
                 HStack(spacing: 12) {
                     Button("Back to Conversations") { state.backToDashboard() }
                     Spacer(minLength: 24)
-                    Button("Open Archive") { state.openArchive() }
-                        .help("The archive’s index: every conversation, and its pages and files")
+                    Button("Archive Details") { state.openArchive() }
+                        .help("What was read, and every conversation with its pages and files; works in any browser")
                     Button("Message Explorer") { state.openExplorer() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)

@@ -115,15 +115,15 @@ extension Recognition {
     /// on. Files read before are taken from the cache.
     public static func readArchive(_ root: URL, trash: TrashCan,
                                    progress: @escaping @Sendable (Int, Int) -> Void) async throws -> ArchiveOutcome {
-        guard var state = ArchiveState.read(root) else { throw Exhibits.Problem.notAnArchive }
-        var map = state.attachments
+        guard var state = ArchiveState.read(root) else { throw UpdateError.refusing(root) }
+        let map = state.attachments
         var items: [Item] = []
         for t in state.threads {
             guard let archived = ArchivedMessages.find(t, root: root) else { continue }
             while let m = archived.waiting() {
                 archived.pop()
                 for a in m.message.attachments where a.appPayload != true {
-                    guard let known = ArchiveWriter.recorded(a, source: m.source, in: &map), let primary = known.primary,
+                    guard let known = map[ArchiveWriter.key(a, source: m.source)], let primary = known.primary,
                           ArchiveState.file(primary, in: root) != nil else { continue }
                     let kind = ArchiveWriter.kind(known.kind)
                     guard kind == .image || kind == .audio else { continue }
@@ -149,7 +149,7 @@ extension Recognition {
             try placer.place(json(result.found.map(entry)), at: root.appendingPathComponent("JSON/recognized.json"))
             let manifest = ArchiveManifest.read(root)
             _ = try await ArchiveManifest.write(root: root, archive: state.archiveName,
-                                                source: URL(fileURLWithPath: manifest?.source.path ?? state.source.path),
+                                                source: URL(fileURLWithPath: manifest?.source.path ?? state.sourcePath),
                                                 sourceSHA256: manifest?.source.sha256, created: now, placer: placer, cache: cache)
         }
         try? cache.save(keeping: Set(ArchiveManifest.files(in: root)))

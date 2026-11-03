@@ -17,6 +17,7 @@ public enum SearchIndex {
             has_attachment INTEGER, page TEXT, anchor TEXT, body TEXT, source TEXT NOT NULL DEFAULT 'messages', service TEXT);
         CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, date);
         CREATE INDEX IF NOT EXISTS messages_day ON messages(day);
+        CREATE INDEX IF NOT EXISTS messages_source_thread ON messages(source, thread_id, date);
         CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(body, content='messages', content_rowid='id',
             tokenize='unicode61 remove_diacritics 2');
         CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
@@ -26,14 +27,11 @@ public enum SearchIndex {
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
         """
 
-    /// An index made before Milestone 13 has no `source` column: every row in it is Messages'.
-    /// The writer adds the column (1.0 still writes to it, and gets the default); the reader,
-    /// which only reads, uses `'messages'` in its place. Before Milestone 14 there was no
-    /// `service` either: rows written then have none, and only show with every platform ticked.
-    static func hasColumn(_ db: OpaquePointer?, _ name: String) -> Bool {
+    /// An index made by an earlier version has no `service` column: it isn't read.
+    static func isCurrent(_ db: OpaquePointer?) -> Bool {
         var s: OpaquePointer?
         defer { sqlite3_finalize(s) }
-        guard sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('messages') WHERE name = '\(name)'", -1, &s, nil) == SQLITE_OK else { return false }
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('messages') WHERE name = 'service'", -1, &s, nil) == SQLITE_OK else { return false }
         return sqlite3_step(s) == SQLITE_ROW
     }
 
@@ -104,25 +102,16 @@ final class SearchIndexWriter {
     }
 
     /// Opens (or makes) an index file; `replacing` conversations lose their old entries
-    /// (`ThreadRef.noConversation` for the messages in none); `replacingAll`, every entry.
-    init(url: URL, replacing threads: [ThreadRef], replacingAll: Bool = false) throws {
+    /// (`ThreadRef.noConversation` for the messages in none).
+    init(url: URL, replacing threads: [ThreadRef]) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             throw SearchError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
         try exec(SearchIndex.schema)
-        if !SearchIndex.hasColumn(db, "source") {
-            try exec("ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT 'messages'")
-        }
-        if !SearchIndex.hasColumn(db, "service") {
-            try exec("ALTER TABLE messages ADD COLUMN service TEXT")
-        }
-        try exec("CREATE INDEX IF NOT EXISTS messages_source_thread ON messages(source, thread_id, date)")
         try exec("BEGIN")
         firstNew = Self.maxId(db) + 1
-        if replacingAll {
-            try exec("DELETE FROM messages")
-        } else if !threads.isEmpty {
+        if !threads.isEmpty {
             try exec("DELETE FROM messages WHERE \(SearchIndex.threadsClause(threads))")
         }
         let sql = """
@@ -301,11 +290,13 @@ private func bind(_ s: OpaquePointer?, _ i: Int32, _ v: String?) {
 public enum SearchError: Error, Equatable, LocalizedError {
     case sqlite(String)
     case noIndex(String)
+    case earlierVersion(String)
 
     public var errorDescription: String? {
         switch self {
         case .sqlite(let m): "The search index couldn’t be used: \(m)"
         case .noIndex(let path): "\(path) has no search index: it was made before MessageArchiver could search. Export it again to add one."
+        case .earlierVersion(let path): "\(path) was made by an earlier version of MessageArchiver, whose search index this version doesn’t read. Update the archive to rebuild it."
         }
     }
 }
@@ -358,10 +349,8 @@ public final class ArchiveSearch: @unchecked Sendable {
     public let root: URL
     private var db: OpaquePointer?
     private let lock = NSLock()
-    /// The `source` column, or Messages for an index made before there was one.
-    private var source = "m.source"
-    /// The `service` column, or none for an index made before Milestone 14.
-    private var service = "m.service"
+    private let source = "m.source"
+    private let service = "m.service"
 
     public convenience init(root: URL) throws {
         try self.init(url: SearchIndex.url(root), root: root)
@@ -374,14 +363,10 @@ public final class ArchiveSearch: @unchecked Sendable {
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             throw SearchError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
-        if !SearchIndex.hasColumn(db, "source") { source = "'messages'" }
-        if !SearchIndex.hasColumn(db, "service") { service = "NULL" }
+        guard SearchIndex.isCurrent(db) else { throw SearchError.earlierVersion(root.path) }
     }
 
     deinit { sqlite3_close(db) }
-
-    /// Made since Milestone 14: every row names its service.
-    public var hasServices: Bool { service != "NULL" }
 
     /// The thread's id as `ThreadRef.description` gives it: `10`, or `whatsapp:10`.
     private var threadKey: String { "(CASE \(source) WHEN 'messages' THEN CAST(m.thread_id AS TEXT) ELSE \(source) || ':' || m.thread_id END)" }
