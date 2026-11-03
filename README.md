@@ -6,7 +6,7 @@ never changes anything in Messages.
 
 One export can produce:
 - **Conversations:** a faithful, iMessage-style HTML view for a personal archive.
-- **Transcripts:** a formal record with Bates numbering, pagination and SHA-256 integrity
+- **Transcripts** (with Settings ▸ Legal tools on): a formal record with Bates numbering, pagination and SHA-256 integrity
   hashes, as HTML and PDF. From a transcript, an **exhibit** of only the messages you pick
   (File ▸ Search an Archive… ▸ New Exhibit…), numbered on, with each message's place in the
   full transcript and every gap marked, and redactions with a log (the unredacted copy beside

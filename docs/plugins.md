@@ -31,7 +31,10 @@ MessageArchiver speaks. `executable` sits beside `plugin.json`. `cargo_package` 
 ## Installing
 
 From Settings ▸ Sources ▸ Install Plug-in…, File ▸ Install Plug-in…, or by opening the file in
-Finder. The app unzips it into a hidden folder in its plug-ins folder
+Finder. The folder a browser opened a download into (Safari takes a zip for a "safe" file and
+opens it) installs too, from Install Plug-in…: it is copied as it is, its files' signatures
+with it. The app declares `.maplugin` as plain data, not a zip, so Safari leaves it alone once
+the app is installed. The app unzips it into a hidden folder in its plug-ins folder
 (`~/Library/Application Support/RYSYS4MAC/MessageArchiver/Plugins/`), and checks it there:
 
 1. `plugin.json` reads, with a valid id, and the program beside it;

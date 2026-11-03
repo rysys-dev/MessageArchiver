@@ -1226,10 +1226,12 @@ final class AppState {
 
     func chooseAndInstallPlugin() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "maplugin") ?? .zip]
+        // Safari opens a download it takes for a zip into a folder: that folder installs too.
+        panel.allowedContentTypes = [.init(filenameExtension: "maplugin") ?? .data, .folder]
+        panel.canChooseDirectories = true
         panel.allowsOtherFileTypes = false
         panel.prompt = "Install"
-        panel.message = "Choose a MessageArchiver plug-in (.maplugin), from apps.rysys.net."
+        panel.message = "Choose a MessageArchiver plug-in from apps.rysys.net: the .maplugin, or the folder your browser opened it into."
         if panel.runModal() == .OK, let url = panel.url { installPlugin(url) }
     }
 

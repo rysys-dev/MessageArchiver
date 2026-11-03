@@ -110,12 +110,13 @@ cat > "${STAGING}/Contents/Info.plist" <<PLIST
     <key>NSHumanReadableCopyright</key>    <string>© 2026 RYSYS · GPL-3.0</string>
     <key>NSContactsUsageDescription</key>  <string>MessageArchiver shows the names of the people in your conversations instead of their phone numbers and email addresses. Contacts are only read, on this Mac.</string>
     <key>NSSpeechRecognitionUsageDescription</key> <string>When you choose to read text in photos and voice notes, MessageArchiver turns voice notes into text for searching your archive. It is done on this Mac only; nothing is sent anywhere.</string>
-    <!-- Plug-ins (Milestone 17): a .maplugin opened in Finder installs, after asking. -->
+    <!-- Plug-ins (Milestone 17): a .maplugin opened in Finder installs, after asking. Plain data,
+         not a kind of zip: Safari opens zips it downloads into folders. -->
     <key>UTExportedTypeDeclarations</key>
     <array><dict>
         <key>UTTypeIdentifier</key>        <string>com.rysys.messagearchiver.plugin</string>
         <key>UTTypeDescription</key>       <string>MessageArchiver Plug-in</string>
-        <key>UTTypeConformsTo</key>        <array><string>public.zip-archive</string></array>
+        <key>UTTypeConformsTo</key>        <array><string>public.data</string></array>
         <key>UTTypeTagSpecification</key>  <dict><key>public.filename-extension</key><array><string>maplugin</string></array></dict>
     </dict></array>
     <key>CFBundleDocumentTypes</key>

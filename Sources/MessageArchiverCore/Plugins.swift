@@ -113,8 +113,9 @@ public enum PluginStore {
     }
 
     /// Unpacks a `.maplugin` (a zip holding `plugin.json`, the helper, `instructions.html`, its
-    /// license and notices), checks it, and only then puts it in place: a plug-in already there
-    /// goes to the Trash. Nothing that fails a check is kept.
+    /// license and notices), or copies the folder a browser opened it into, checks it, and only
+    /// then puts it in place: a plug-in already there goes to the Trash. Nothing that fails a
+    /// check is kept.
     @discardableResult
     public static func install(_ archive: URL, into folder: URL = folder, requirement: String = PluginTrust.requirement,
                                appVersion: String = AppVersion.string, trash: TrashCan = .standard()) throws -> InstalledPlugin {
@@ -122,11 +123,23 @@ public enum PluginStore {
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         let staging = folder.appendingPathComponent(".installing-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: staging) }
-        try unzip(archive, into: staging)
-        // The zip holds the plug-in's folder, or its files directly.
-        let entries = ((try? fm.contentsOfDirectory(atPath: staging.path)) ?? []).filter { !$0.hasPrefix(".") && $0 != "__MACOSX" }
-        let root = entries.count == 1 && !fm.fileExists(atPath: staging.appendingPathComponent("plugin.json").path)
-            ? staging.appendingPathComponent(entries[0]) : staging
+        var isFolder: ObjCBool = false
+        if fm.fileExists(atPath: archive.path, isDirectory: &isFolder), isFolder.boolValue {
+            // A download Safari opened into a folder: copied as it is, signatures and all, and
+            // checked as a .maplugin is.
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            try fm.copyItem(at: archive, to: staging.appendingPathComponent(archive.lastPathComponent))
+        } else {
+            try unzip(archive, into: staging)
+        }
+        // The zip holds the plug-in's folder, or its files directly; a folder chosen may be
+        // the one Safari opened it into.
+        var root = staging
+        for _ in 0..<3 where !fm.fileExists(atPath: root.appendingPathComponent("plugin.json").path) {
+            let entries = ((try? fm.contentsOfDirectory(atPath: root.path)) ?? []).filter { !$0.hasPrefix(".") && $0 != "__MACOSX" }
+            guard entries.count == 1 else { break }
+            root = root.appendingPathComponent(entries[0])
+        }
         guard fm.fileExists(atPath: root.appendingPathComponent("plugin.json").path) else {
             throw PluginError.notAPlugin(archive.lastPathComponent)
         }
