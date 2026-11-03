@@ -17,14 +17,84 @@ struct TranscriptDocument {
     var people: [String: ExportPerson]
     /// Scaled images, kept between layout passes.
     let images = ImageCache()
+    /// Set for an exhibit of chosen entries (Milestone 23): only those are shown.
+    var exhibit: ExhibitLayout? = nil
+    /// A cover given whole, but for the Bates range: a transcript rebuilt from the archive
+    /// keeps the facts of the export that made it.
+    var fixedCover: [(String, String)]? = nil
+
+    /// What makes a transcript an exhibit: the entries chosen (by index), the cover's lines,
+    /// and each entry's page in the full transcript.
+    struct ExhibitLayout {
+        var name: String
+        var chosen: Set<Int>
+        /// Every line of the cover but the Bates range, which is added last.
+        var cover: [(String, String)]
+        var entryPages: [String]
+    }
+
+    /// What the body shows, in order: entries (with the number of the first exhibit they
+    /// list) and, in an exhibit, the runs of entries left out.
+    enum Item: Equatable {
+        case entry(index: Int, firstExhibit: Int)
+        case gap(from: Int, to: Int)
+    }
+
+    var items: [Item] {
+        var out: [Item] = []
+        var exhibits = 0
+        var gapStart: Int?
+        for (i, e) in entries.enumerated() {
+            if let exhibit, !exhibit.chosen.contains(i) {
+                if gapStart == nil { gapStart = i + 1 }
+            } else {
+                if let from = gapStart { out.append(.gap(from: from, to: i)); gapStart = nil }
+                out.append(.entry(index: i, firstExhibit: exhibits + 1))
+            }
+            exhibits += e.exhibits.count
+        }
+        if let from = gapStart { out.append(.gap(from: from, to: entries.count)) }
+        return out
+    }
+
+    static func gapText(from: Int, to: Int) -> String {
+        from == to ? "Entry #\(from) is not in this exhibit." : "Entries #\(from)–#\(to) are not in this exhibit (\(to - from + 1) entries)."
+    }
+
+    var shownEntries: [TranscriptEntry] {
+        guard let exhibit else { return entries }
+        return entries.indices.filter(exhibit.chosen.contains).map { entries[$0] }
+    }
+
+    var title: String { exhibit == nil ? "Transcript of Messages" : "Exhibit of Messages" }
+
+    var explanation: String {
+        let base = "Times are as recorded on the device, with their offset from UTC. Message text is reproduced verbatim. Attachments are listed as exhibits with the SHA-256 of the file in this archive"
+        if exhibit != nil {
+            return "This exhibit reproduces chosen entries of the transcript named above, each with its entry number and page there; a line marks where entries were left out. Times, text, senders and exhibits are as that transcript states them."
+        }
+        return "Entries are numbered in date order. " + base + "; [MISSING – not on disk] marks an attachment Messages lists but whose file was not on the device."
+    }
+
+    /// An entry's page in the full transcript, shown in an exhibit.
+    func exhibitPage(_ index: Int) -> String? {
+        guard let pages = exhibit?.entryPages, pages.indices.contains(index) else { return nil }
+        return pages[index]
+    }
+
+    /// In an exhibit, a reply to an entry left out says so.
+    func replyText(_ number: Int) -> String {
+        guard let exhibit, !exhibit.chosen.contains(number - 1) else { return "In reply to entry #\(number)" }
+        return "In reply to entry #\(number) (not in this exhibit)"
+    }
 
     /// Entry numbers by message guid, for "In reply to entry #…".
     var numbers: [String: Int] {
         Dictionary(entries.enumerated().map { ($1.guid, $0 + 1) }, uniquingKeysWith: { a, _ in a })
     }
 
-    var exhibitCount: Int { entries.reduce(0) { $0 + $1.exhibits.count } }
-    var missingCount: Int { entries.reduce(0) { $0 + $1.exhibits.filter { $0.archivePath == nil }.count } }
+    var exhibitCount: Int { shownEntries.reduce(0) { $0 + $1.exhibits.count } }
+    var missingCount: Int { shownEntries.reduce(0) { $0 + $1.exhibits.filter { $0.archivePath == nil }.count } }
 
     /// "A", … "Z", "AA", "AB", …: one letter code per conversation, in index order.
     static func letter(_ index: Int) -> String {
@@ -65,6 +135,7 @@ struct TranscriptDocument {
     }
 
     func coverLines(bates: String) -> [(String, String)] {
+        if let fixed = exhibit?.cover ?? fixedCover { return fixed + [("Bates range", bates)] }
         let f = facts
         var tzName = f.timeZone.identifier
         let seconds = f.timeZone.secondsFromGMT(for: f.exported)
@@ -99,12 +170,17 @@ struct TranscriptDocument {
         var platforms = services.isEmpty ? "None" : PlatformFilter.list(services)
         if let only = f.platforms { platforms += " (Platform filter: only \(PlatformFilter.list(only)) exported)" }
         lines.append(("Platforms", platforms))
-        let first = entries.first?.date, last = entries.last?.date
-        let entryCount = entries.count == 1 ? "1 entry" : "\(entries.count.formatted()) entries"
-        lines.append(("This transcript", "\(entryCount) · \(Plural.count(exhibitCount, "exhibit")) (\(missingCount) missing) · \(Self.timestamp(first)) to \(Self.timestamp(last))"))
+        lines.append(("This transcript", thisTranscript))
         lines.append(("Bates range", bates))
         lines.append(("Software", "MessageArchiver \(f.appVersion); ma-engine \(f.engineVersion); imessage-database \(f.crateVersion)"))
         return lines
+    }
+
+    /// "4 entries · 2 exhibits (1 missing) · <first> to <last>".
+    var thisTranscript: String {
+        let first = entries.first?.date, last = entries.last?.date
+        let entryCount = entries.count == 1 ? "1 entry" : "\(entries.count.formatted()) entries"
+        return "\(entryCount) · \(Plural.count(exhibitCount, "exhibit")) (\(missingCount) missing) · \(Self.timestamp(first)) to \(Self.timestamp(last))"
     }
 
     var ownerLabel: String {
@@ -123,14 +199,14 @@ struct TranscriptDocument {
     /// The cover: what states the Bates range, so the only part laid out again as the range
     /// settles (audit M13).
     func cover(bates: String) -> PDFLayout.Block {
-        var cover: [PDFLayout.Row] = PDFLayout.rows(PDFLayout.text("Transcript of Messages", size: 18, bold: true))
+        var cover: [PDFLayout.Row] = PDFLayout.rows(PDFLayout.text(title, size: 18, bold: true))
         cover += PDFLayout.rows(PDFLayout.text(" ", size: 8))
         for (label, value) in coverLines(bates: bates) {
             cover += PDFLayout.rows(PDFLayout.text(label.uppercased(), size: 7.5, bold: true, gray: true))
             cover += PDFLayout.rows(PDFLayout.text(value, size: 10.5))
             cover += PDFLayout.rows(PDFLayout.text(" ", size: 4))
         }
-        cover += PDFLayout.rows(PDFLayout.text("Entries are numbered in date order. Times are as recorded on the device, with their offset from UTC. Message text is reproduced verbatim. Attachments are listed as exhibits with the SHA-256 of the file in this archive; [MISSING – not on disk] marks an attachment Messages lists but whose file was not on the device.", size: 8.5, italic: true, gray: true))
+        cover += PDFLayout.rows(PDFLayout.text(explanation, size: 8.5, italic: true, gray: true))
         return PDFLayout.Block(rows: cover, keep: cover.count, entry: nil, spaceAfter: 0)
     }
 
@@ -138,18 +214,28 @@ struct TranscriptDocument {
     func body() -> [PDFLayout.Block] {
         var blocks: [PDFLayout.Block] = []
         let numbers = self.numbers
-        var exhibitNumber = 0
-        for (i, e) in entries.enumerated() {
+        for item in items {
+            guard case .entry(let i, let firstExhibit) = item else {
+                if case .gap(let from, let to) = item {
+                    let rows = PDFLayout.rows(PDFLayout.text("[\(Self.gapText(from: from, to: to))]", size: 9, italic: true, gray: true))
+                    blocks.append(PDFLayout.Block(rows: rows, keep: rows.count, entry: nil, pageBreakBefore: blocks.isEmpty))
+                }
+                continue
+            }
+            let e = entries[i]
             let n = i + 1
+            var exhibitNumber = firstExhibit - 1
             var head = "#\(n)    \(Self.timestamp(e.date))    "
             head += e.isEvent ? "Event" : "\(sender(e))    \(e.service)"
             var rows = PDFLayout.rows(PDFLayout.text(head, size: 9.5, bold: true))
+            // In an exhibit, where the entry is in the full transcript: about it, not part of it.
+            if let page = exhibitPage(i) { rows += PDFLayout.rows(PDFLayout.text("[Transcript page \(page)]", size: 8.5, italic: true, gray: true)) }
             var flags: [String] = []
             if e.edited { flags.append("[EDITED]") }
             if e.unsent { flags.append("[UNSENT]") } else if e.unsentParts > 0 { flags.append("[UNSENT – part of the message]") }
             if e.recovered { flags.append("[RECOVERED – deleted message]") }
             if let reply = e.replyTo {
-                flags.append(numbers[reply].map { "In reply to entry #\($0)" } ?? "In reply to a message not in this transcript")
+                flags.append(numbers[reply].map(replyText) ?? "In reply to a message not in this transcript")
             }
             if !flags.isEmpty { rows += PDFLayout.rows(PDFLayout.text(flags.joined(separator: "   "), size: 9, bold: true)) }
             let keep = rows.count + 1
@@ -179,7 +265,7 @@ struct TranscriptDocument {
             for a in e.annotations {
                 rows += PDFLayout.rows(PDFLayout.text("[\(a)]", size: 8.5, italic: true, gray: true), indent: 14)
             }
-            blocks.append(PDFLayout.Block(rows: rows, keep: min(keep, rows.count), entry: n, pageBreakBefore: i == 0))
+            blocks.append(PDFLayout.Block(rows: rows, keep: min(keep, rows.count), entry: n, pageBreakBefore: blocks.isEmpty))
         }
         return blocks
     }
@@ -204,33 +290,41 @@ struct TranscriptDocument {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="generator" content="MessageArchiver \(HTML.escape(facts.appVersion))">
-            <title>Transcript — \(HTML.escape(thread.title))</title>
+            <title>\(exhibit.map { "Exhibit — \(HTML.escape($0.name))" } ?? "Transcript — \(HTML.escape(thread.title))")</title>
             <style>\(Self.css)</style>
             </head>
             <body>
             <nav class="back"><a href="../index.html">← Archive index</a> · <a href="\(HTML.path(pdfName))">PDF (Bates \(HTML.escape(bates)))</a></nav>
-            <h1>Transcript of Messages</h1>
+            <h1>\(title)</h1>
             <table class="cover">
 
             """
         for (label, value) in coverLines(bates: bates) {
             out += "<tr><th>\(HTML.escape(label))</th><td>\(HTML.escape(value))</td></tr>\n"
         }
-        out += "</table>\n<p class=\"note\">Entries are numbered in date order. Times are as recorded on the device, with their offset from UTC. Message text is reproduced verbatim. Attachments are listed as exhibits with the SHA-256 of the file in this archive.</p>\n"
+        out += "</table>\n<p class=\"note\">\(HTML.escape(explanation))</p>\n"
         let numbers = self.numbers
-        var exhibitNumber = 0
-        for (i, e) in entries.enumerated() {
+        for item in items {
+            guard case .entry(let i, let firstExhibit) = item else {
+                if case .gap(let from, let to) = item { out += "<p class=\"gap\">[\(HTML.escape(Self.gapText(from: from, to: to)))]</p>\n" }
+                continue
+            }
+            let e = entries[i]
             let n = i + 1
+            var exhibitNumber = firstExhibit - 1
             out += "<article id=\"e\(n)\"><h2><span class=\"n\">#\(n)</span> <span class=\"time\">\(HTML.escape(Self.timestamp(e.date)))</span> "
             out += e.isEvent ? "<span class=\"who\">Event</span>" : "<span class=\"who\">\(HTML.escape(sender(e)))</span> <span class=\"service\">\(HTML.escape(e.service))</span>"
             out += "</h2>\n"
+            if let page = exhibitPage(i) { out += "<p class=\"annotation page\">[Transcript page \(HTML.escape(page))]</p>\n" }
             var flags: [String] = []
             if e.edited { flags.append("[EDITED]") }
             if e.unsent { flags.append("[UNSENT]") } else if e.unsentParts > 0 { flags.append("[UNSENT – part of the message]") }
             if e.recovered { flags.append("[RECOVERED – deleted message]") }
             var flagHTML = flags.map(HTML.escape).joined(separator: " ")
             if let reply = e.replyTo {
-                flagHTML += " " + (numbers[reply].map { "<a href=\"#e\($0)\">In reply to entry #\($0)</a>" } ?? "In reply to a message not in this transcript")
+                flagHTML += " " + (numbers[reply].map { n in
+                    exhibit.map { !$0.chosen.contains(n - 1) } == true ? HTML.escape(replyText(n)) : "<a href=\"#e\(n)\">\(replyText(n))</a>"
+                } ?? "In reply to a message not in this transcript")
             }
             if !flagHTML.trimmingCharacters(in: .whitespaces).isEmpty { out += "<p class=\"flags\">\(flagHTML)</p>\n" }
             if let note = e.note { out += "<p class=\"source_note\">[\(HTML.escape(note))]</p>\n" }
@@ -271,9 +365,10 @@ struct TranscriptDocument {
         ol.history, p.exhibit, p.annotation { font-size: 0.85em; margin: 0.2em 0 0.2em 1.1em; overflow-wrap: anywhere; }
         p.annotation { color: #555; font-style: italic; } p.missing { color: #8A6A2E; }
         p.source_note { color: #555; font-style: italic; margin: 0.2em 0 0.2em 1.1em; }
+        p.gap { color: #555; font-style: italic; font-size: 0.85em; text-align: center; border-bottom: 1px solid #e3e3e3; padding: 0.6em 0; margin: 0; }
         img.exhibit { display: block; max-width: 60%; max-height: 22em; margin: 0.3em 0 0.3em 2em; }
         footer { margin: 2em 0; color: #555; font-size: 0.85em; text-align: center; }
-        @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } table.cover th, p.note, p.annotation, p.source_note, article h2 .service, footer { color: #aaa; } a { color: #6cb2ff; } article { border-color: #333; } p.missing { color: #C9A86A; } }
+        @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } table.cover th, p.note, p.annotation, p.source_note, p.gap, article h2 .service, footer { color: #aaa; } a { color: #6cb2ff; } article { border-color: #333; } p.missing { color: #C9A86A; } }
         """
 }
 

@@ -32,6 +32,11 @@ final class SearchModel {
     var platforms = PlatformFilter() { didSet { schedule() } }
     var selection: SearchHit.ID? { didSet { loadContext() } }
     private var pending: Task<Void, Never>?
+    /// The archive's saved exhibits, and the conversations with a transcript to take one from
+    /// (Milestone 23).
+    private(set) var exhibits: [Exhibit] = []
+    private(set) var transcriptThreads: Set<ThreadRef> = []
+    private(set) var editing: ExhibitModel?
 
     var selected: SearchHit? { results.first { $0.id == selection } }
 
@@ -56,6 +61,8 @@ final class SearchModel {
             services = s.services()
             platforms = PlatformFilter()
             total = s.messageCount
+            exhibits = Exhibits.read(url)
+            transcriptThreads = Set(Exhibits.conversations(url).map(\.id))
             error = nil
             personId = nil
             threadId = nil
@@ -96,6 +103,23 @@ final class SearchModel {
         context = search.context(of: id)
     }
 
+    var canMakeExhibit: Bool { selected.map { transcriptThreads.contains($0.threadId) } == true }
+
+    func newExhibit() {
+        guard let root, let hit = selected, transcriptThreads.contains(hit.threadId) else { return }
+        editing = ExhibitModel(root: root, thread: hit.threadId, title: hit.threadTitle, saved: nil, focus: hit.guid)
+    }
+
+    func openExhibit(_ e: Exhibit) {
+        guard let root else { return }
+        editing = ExhibitModel(root: root, thread: e.thread, title: e.title, saved: e, focus: e.guids.first)
+    }
+
+    func closeExhibit() {
+        editing = nil
+        if let root { exhibits = Exhibits.read(root) }
+    }
+
     func openInBrowser() {
         // Only a page of the archive's own: its index could be damaged (audit M4).
         guard let root, let page = selected?.page, page.hasSuffix(".html"), let url = ArchiveState.file(page, in: root) else { return }
@@ -116,6 +140,11 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 900, minHeight: 560)
+        .sheet(isPresented: Binding(get: { model.editing != nil }, set: { if !$0 { model.closeExhibit() } })) {
+            if let editing = model.editing {
+                ExhibitView(model: editing) { model.closeExhibit() }
+            }
+        }
         .navigationTitle(model.root == nil ? "Search an Archive" : "Search — \(model.archiveName)")
     }
 
@@ -134,6 +163,14 @@ struct SearchView: View {
                     }
                 }
                 Spacer()
+                Menu("Exhibits") {
+                    ForEach(model.exhibits) { e in
+                        Button("\(e.name) (v\(e.versions.map(\.number).max() ?? 0))") { model.openExhibit(e) }
+                    }
+                }
+                .fixedSize()
+                .disabled(model.exhibits.isEmpty)
+                .help("Exhibits saved in this archive: choose one to make it again")
                 Button("Open Archive…") { model.choose() }
             }
             TextField("Search", text: $model.query, prompt: Text("Search what the messages say"))
@@ -214,6 +251,10 @@ struct SearchView: View {
                 HStack {
                     Text("\(hit.threadTitle) · \(Dates.short(hit.date ?? ""))").font(.headline).lineLimit(1)
                     Spacer()
+                    Button("New Exhibit…") { model.newExhibit() }
+                        .disabled(!model.canMakeExhibit)
+                        .help(model.canMakeExhibit ? "Choose messages of this conversation for an exhibit of its transcript"
+                              : "This conversation has no legal transcript in this archive")
                     if hit.page != nil {
                         Button("Open in Browser") { model.openInBrowser() }
                             .help("Opens the conversation page in your browser")

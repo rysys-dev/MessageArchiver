@@ -56,7 +56,7 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; <a href="#exhibits">exhibits of chosen messages</a>, new in 1.3.1, are described below.</p>
 
 <nav aria-label="Contents">
   <ol>
@@ -70,6 +70,7 @@ th { color: var(--muted); font-weight: 600; }
     <li><a href="#update">Update an archive</a></li>
     <li><a href="#verify">Verify an archive</a></li>
     <li><a href="#search">Search an archive</a></li>
+    <li><a href="#exhibits">Exhibits of chosen messages</a></li>
     <li><a href="#iphone">iPhone backups</a></li>
     <li><a href="#plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</a></li>
     <li><a href="#settings">Settings</a></li>
@@ -145,6 +146,7 @@ th { color: var(--muted); font-weight: 600; }
   <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the index. Only when there are some.</td></tr>
   <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
   <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
+  <tr><td><code>Exhibits/</code></td><td><a href="#exhibits">Exhibits of chosen messages</a>, PDF and HTML, one file per version. Only once you make one.</td></tr>
   <tr><td><code>Markdown/</code>, <code>JSON/</code></td><td>One file per conversation; <code>JSON/</code> also has <code>people.json</code> and <code>archive.json</code>.</td></tr>
   <tr><td><code>Attachments/</code></td><td>Photos, videos, voice notes and files, named by date, each dated as it was sent.</td></tr>
   <tr><td><code>manifest.json</code>, <code>SHA256SUMS.txt</code></td><td>The size and SHA-256 of every file, to prove nothing changed.</td></tr>
@@ -170,6 +172,17 @@ th { color: var(--muted); font-weight: 600; }
 
 <h2 id="search">Search an archive</h2>
 <p><span class="menu">File › Search an Archive…</span> (<kbd>⇧⌘F</kbd>) finds any message in an archive. Type words in any order (accents and case don't matter; put a phrase in quotes), and narrow by person, conversation, dates or attachments. Click a result to see it in its conversation, outlined.</p>
+
+<h2 id="exhibits">Exhibits of chosen messages</h2>
+<p>An exhibit is a short transcript of only the messages you pick from one conversation, for a filing or a letter, instead of the whole conversation. It is taken from the conversation's legal transcript, so the archive must have one (choose <strong>Legal transcript</strong> when you export).</p>
+<ol>
+  <li>In <span class="menu">File › Search an Archive…</span>, find a message of the conversation and click <strong>New Exhibit…</strong>.</li>
+  <li>Tick the messages you want (Shift-click ticks a run), and give the exhibit a name, such as "Exhibit 3 – rent messages".</li>
+  <li>Check where its Bates numbers start: it carries on from the archive's transcripts, so no two pages in the archive share a number. Then click <strong>Make Exhibit</strong>.</li>
+</ol>
+<p>The exhibit is <code>Exhibits/&lt;name&gt; v1.pdf</code> (and <code>.html</code>). Its cover says which transcript it was taken from and which entries it shows. Each message keeps its entry number and has its page in the full transcript beside it, and a line such as "[Entries #5–#16 are not in this exhibit]" marks every gap, so nobody can mistake a selection for the whole conversation. The words, senders and attachment exhibit numbers are exactly the transcript's.</p>
+<p>The exhibit is saved in the archive. Choose it from the <strong>Exhibits</strong> menu in the Search window to change the messages and make it again: that makes <code>v2</code>, with new Bates numbers, and leaves <code>v1</code> as it was, in case it has already been sent. The archive's manifest includes every exhibit, so Verify still passes.</p>
+<p>A transcript made by MessageArchiver 1.3.0 or earlier didn't keep what an exhibit needs. The first time you make an exhibit from one, MessageArchiver offers to <strong>rebuild the transcript</strong> from the archive: the same messages, with the archive's next Bates numbers. The old transcript stays beside it, its name ending "(made &lt;date&gt;)", so numbers already sent out still point to the same pages.</p>
 
 <h2 id="iphone">iPhone backups</h2>
 <p>MessageArchiver can read a backup of an iPhone made with Finder instead of this Mac's Messages, which helps when the iPhone has older messages than the Mac.</p>

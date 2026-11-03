@@ -277,6 +277,8 @@ public struct SearchHit: Sendable, Identifiable, Equatable {
     public var anchor: String
     /// The text around the match, with the matched words between `\u{2}` and `\u{3}`.
     public var snippet: String
+    /// The message's guid: where an exhibit's list opens (Milestone 23).
+    public var guid: String? = nil
 }
 
 public struct SearchFilters: Sendable, Equatable {
@@ -356,7 +358,7 @@ public final class ArchiveSearch: @unchecked Sendable {
         let snippet = match == nil ? "substr(m.body, 1, 160)" : "snippet(fts, 0, char(2), char(3), '…', 14)"
         let from = match == nil ? "messages m" : "fts JOIN messages m ON m.id = fts.rowid"
         let sql = """
-            SELECT m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, \(snippet)
+            SELECT m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, \(snippet), m.guid
             FROM \(from) WHERE \(whereParts.joined(separator: " AND ")) ORDER BY m.date DESC, m.id DESC LIMIT \(limit)
             """
         return rows(sql, binds)
@@ -364,7 +366,7 @@ public final class ArchiveSearch: @unchecked Sendable {
 
     /// The messages around one, in its conversation, oldest first: what a hit looks like in place.
     public func context(of id: Int, around n: Int = 12) -> [SearchHit] {
-        let cols = "m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, m.body"
+        let cols = "m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, m.body, m.guid"
         guard let hit = rows("SELECT \(cols) FROM messages m WHERE m.id = ?", [id]).first else { return [] }
         let same = "\(source) = ? AND m.thread_id = ?"
         let t: [Any] = [hit.threadId.source.rawValue, hit.threadId.id]
@@ -436,6 +438,23 @@ public final class ArchiveSearch: @unchecked Sendable {
         choices("SELECT \(threadKey), MAX(m.thread_title), COUNT(*) FROM messages m GROUP BY 1")
     }
 
+    /// Handle → the name the archive showed for it, where it showed one: what a transcript
+    /// rebuilt from the archive names its senders by (Milestone 23).
+    func senderNames() -> [String: String] {
+        lock.withLock {
+            var s: OpaquePointer?
+            defer { sqlite3_finalize(s) }
+            let sql = "SELECT handle, MAX(sender) FROM messages WHERE from_me = 0 AND handle IS NOT NULL AND sender IS NOT NULL AND sender != handle GROUP BY handle"
+            guard sqlite3_prepare_v2(db, sql, -1, &s, nil) == SQLITE_OK else { return [:] }
+            var out: [String: String] = [:]
+            while sqlite3_step(s) == SQLITE_ROW {
+                guard let h = sqlite3_column_text(s, 0), let n = sqlite3_column_text(s, 1) else { continue }
+                out[String(cString: h)] = String(cString: n)
+            }
+            return out
+        }
+    }
+
     public var messageCount: Int {
         lock.withLock {
             var s: OpaquePointer?
@@ -472,7 +491,7 @@ public final class ArchiveSearch: @unchecked Sendable {
                 out.append(SearchHit(id: Int(sqlite3_column_int64(s, 0)), threadId: text(s, 1).flatMap(ThreadRef.init) ?? .noConversation(),
                                      threadTitle: text(s, 2) ?? "", sender: text(s, 3) ?? "", handle: text(s, 4),
                                      fromMe: sqlite3_column_int(s, 5) != 0, date: text(s, 6), hasAttachment: sqlite3_column_int(s, 7) != 0,
-                                     page: text(s, 8), anchor: text(s, 9) ?? "", snippet: text(s, 10) ?? ""))
+                                     page: text(s, 8), anchor: text(s, 9) ?? "", snippet: text(s, 10) ?? "", guid: text(s, 11)))
             }
             return out
         }

@@ -97,3 +97,55 @@ struct TranscriptFacts: Sendable {
         var sha256: String?
     }
 }
+
+/// What an exhibit needs of a conversation's transcript (Milestone 23), kept beside its entries
+/// in `.messagearchiver/transcripts/<key>.json` (the entries in `<key>.ndjson`): an exhibit is
+/// laid out from the very entries the transcript was, so its words, senders and exhibit numbers
+/// are the transcript's.
+struct TranscriptRecord: Codable, Sendable, Equatable {
+    static let folder = ".messagearchiver/transcripts"
+
+    var thread: ThreadRef
+    var title: String
+    var letter: String
+    var pdf: String
+    var html: String
+    var first: String
+    var last: String
+    var pages: Int
+    /// When it was made, ISO 8601.
+    var made: String
+    /// The cover's lines as printed, label and value.
+    var cover: [[String]]
+    /// Each entry's page, as its Bates number, in entry order.
+    var entryPages: [String]
+
+    static func url(_ root: URL, _ id: ThreadRef, ext: String) -> URL {
+        root.appendingPathComponent(folder).appendingPathComponent("\(Explorer.key(id)).\(ext)")
+    }
+
+    static func read(_ root: URL, _ id: ThreadRef) -> TranscriptRecord? {
+        guard let data = try? Data(contentsOf: url(root, id, ext: "json")) else { return nil }
+        return try? JSONDecoder().decode(TranscriptRecord.self, from: data)
+    }
+
+    /// The entries the transcript was laid out from, in order; nil when they weren't kept.
+    static func entries(_ root: URL, _ id: ThreadRef) -> [TranscriptEntry]? {
+        guard let text = try? String(contentsOf: url(root, id, ext: "ndjson"), encoding: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        return text.split(separator: "\n").compactMap { try? decoder.decode(TranscriptEntry.self, from: Data($0.utf8)) }
+    }
+
+    /// Keeps the entries (moved from the transcript's part file) and the record, replacing a
+    /// conversation's earlier ones.
+    static func keep(_ record: TranscriptRecord, entries part: URL, root: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+        let kept = url(root, record.thread, ext: "ndjson")
+        try? fm.removeItem(at: kept)
+        try fm.moveItem(at: part, to: kept)
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        try e.encode(record).write(to: url(root, record.thread, ext: "json"), options: .atomic)
+    }
+}

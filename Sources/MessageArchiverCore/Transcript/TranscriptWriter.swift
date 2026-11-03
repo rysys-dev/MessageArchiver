@@ -52,6 +52,13 @@ final class TranscriptWriter: FormatWriter {
     }
 
     func entry(_ m: ExportMessage, attachments: [RenderedAttachment]) -> TranscriptEntry {
+        Self.entry(m, attachments: attachments, renderer: renderer, options: options)
+    }
+
+    /// One message as the transcript states it; also how a transcript made before exhibits is
+    /// rebuilt from the archive (Milestone 23).
+    static func entry(_ m: ExportMessage, attachments: [RenderedAttachment], renderer: ConversationRenderer,
+                      options: TranscriptOptions) -> TranscriptEntry {
         let sender: String
         if m.isFromMe {
             let me = options.ownerName.isEmpty ? "Me" : "\(options.ownerName) (Me)"
@@ -98,6 +105,23 @@ final class TranscriptWriter: FormatWriter {
             exhibits: withMime, annotations: annotations, note: m.kind == "announcement" ? nil : m.note)
     }
 
+    /// A transcript's pages, numbered from `start`. The cover states the Bates range, which
+    /// needs the page count: lay out until the count holds (the range's own text could, in
+    /// principle, change the cover's length). The entries start on a page of their own, so they
+    /// are laid out once; only the cover again (audit M13).
+    static func lay(_ doc: TranscriptDocument, options: TranscriptOptions, start: Int) -> [PDFLayout.Page] {
+        let first = options.bates(start)
+        let body = PDFLayout.paginate(doc.body()).filter { !$0.rows.isEmpty }
+        var cover = PDFLayout.paginate([doc.cover(bates: "\(first) – \(first)")])
+        for _ in 0..<3 {
+            let again = PDFLayout.paginate([doc.cover(bates: "\(first) – \(options.bates(start + cover.count + body.count - 1))")])
+            let settled = again.count == cover.count
+            cover = again
+            if settled { break }
+        }
+        return cover + body
+    }
+
     func flush() { files.flush() }
 
     func finish(threads: [ExportThread], stats: [ThreadRef: ThreadStats], footer: String) throws {
@@ -137,21 +161,9 @@ final class TranscriptWriter: FormatWriter {
                 .split(separator: "\n").compactMap { try? decoder.decode(TranscriptEntry.self, from: Data($0.utf8)) }
             let doc = TranscriptDocument(thread: thread, letter: letter(thread), entries: entries,
                                          options: options, facts: facts, hashes: byPath, sizes: sizes, archiveRoot: root, people: people)
-            // The cover states the Bates range, which needs the page count: lay out until the
-            // count holds (the range's own text could, in principle, change the cover's length).
-            // The entries start on a page of their own, so they are laid out once; only the
-            // cover again (audit M13).
             let start = next
             let first = options.bates(start)
-            let body = PDFLayout.paginate(doc.body()).filter { !$0.rows.isEmpty }
-            var cover = PDFLayout.paginate([doc.cover(bates: "\(first) – \(first)")])
-            for _ in 0..<3 {
-                let again = PDFLayout.paginate([doc.cover(bates: "\(first) – \(options.bates(start + cover.count + body.count - 1))")])
-                let settled = again.count == cover.count
-                cover = again
-                if settled { break }
-            }
-            let final = cover + body
+            let final = Self.lay(doc, options: options, start: start)
             let decoration = PDFLayout.Decoration(
                 headerLeft: options.matter.isEmpty ? "Transcript of Messages" : options.matter,
                 headerRight: thread.title,
@@ -161,7 +173,6 @@ final class TranscriptWriter: FormatWriter {
                 author: options.preparedBy.isEmpty ? "MessageArchiver" : options.preparedBy,
                 creator: "MessageArchiver \(facts.appVersion)")
             let pdfName = baseName(thread) + ".pdf"
-            try? FileManager.default.removeItem(at: part)
             // Drawn in full before an earlier one goes to the Trash; only a transcript that was
             // written is recorded, with its Bates range (audit 2026-11-01, H10). One that
             // couldn't be keeps the earlier one, and its numbers.
@@ -174,8 +185,26 @@ final class TranscriptWriter: FormatWriter {
                 let html = doc.html(bates: "\(first) – \(options.bates(start + final.count - 1))", pdfName: pdfName)
                 try placer.place(Data(html.utf8), at: root.appendingPathComponent(htmlPath(of: thread)))
             } catch {
+                try? FileManager.default.removeItem(at: part)
                 problem("Transcript for \(thread.title) couldn’t be written: \(error.localizedDescription)")
                 continue
+            }
+            // Kept for exhibits (Milestone 23): the entries as laid out, and each one's page.
+            var entryPages = Array(repeating: first, count: entries.count)
+            for (index, page) in final.enumerated() {
+                for n in page.starts where n >= 1 && n <= entries.count { entryPages[n - 1] = options.bates(start + index) }
+            }
+            let last = options.bates(start + final.count - 1)
+            let record = TranscriptRecord(thread: thread.id, title: thread.title, letter: doc.letter, pdf: path(of: thread),
+                                          html: htmlPath(of: thread), first: first, last: last, pages: final.count,
+                                          made: ISO8601DateFormatter().string(from: facts.exported),
+                                          cover: doc.coverLines(bates: "\(first) – \(last)").map { [$0.0, $0.1] },
+                                          entryPages: entryPages)
+            do {
+                try TranscriptRecord.keep(record, entries: part, root: root)
+            } catch {
+                try? FileManager.default.removeItem(at: part)
+                problem("Transcript for \(thread.title): what exhibits need couldn’t be kept: \(error.localizedDescription)")
             }
             made.append(TranscriptFile(threadId: thread.id, title: thread.title, pdf: path(of: thread), html: htmlPath(of: thread),
                                        firstBates: first, lastBates: options.bates(start + final.count - 1),

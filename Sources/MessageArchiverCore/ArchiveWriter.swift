@@ -287,6 +287,15 @@ final class LineQueue: @unchecked Sendable {
 /// One export in progress. The engines hand it messages one at a time, merged in date order,
 /// on one thread; attachment work runs on a queue beside it.
 extension ArchiveWriter {
+    static func kind(_ name: String) -> RenderedAttachment.Kind {
+        switch name {
+        case "image": .image
+        case "video": .video
+        case "audio": .audio
+        default: .file
+        }
+    }
+
     /// What an earlier run recorded an attachment under: its guid. One without (another
     /// source's, WhatsApp's media row) is named by its source, number and file name, so two
     /// sources' "5", or a reinstalled app's, are never taken for one file (audit W3).
@@ -507,7 +516,7 @@ private final class Session: @unchecked Sendable {
         // Under the lock: the copy queue changes these records too (audit 2026-11-01, H5).
         if let known = lock.withLock({ ArchiveWriter.recorded(a, source: sourceID, in: &attachments) }), let primary = known.primary,
            ArchiveState.file(primary, in: root) != nil {
-            return RenderedAttachment(kind: Self.kind(known.kind), filename: filename, size: a.size,
+            return RenderedAttachment(kind: ArchiveWriter.kind(known.kind), filename: filename, size: a.size,
                                       primary: "../" + primary, original: known.original.map { "../" + $0 })
         }
         // A decrypted file an earlier attachment took (two attachments, one file in the
@@ -518,7 +527,7 @@ private final class Session: @unchecked Sendable {
                if let earlier { attachments[ArchiveWriter.key(a, source: sourceID)] = earlier }
                return earlier
            }), let primary = earlier.primary {
-            return RenderedAttachment(kind: Self.kind(earlier.kind), filename: filename, size: a.size,
+            return RenderedAttachment(kind: ArchiveWriter.kind(earlier.kind), filename: filename, size: a.size,
                                       primary: "../" + primary, original: earlier.original.map { "../" + $0 })
         }
         guard !a.missing, let path = a.path, FileManager.default.fileExists(atPath: path) else {
@@ -587,14 +596,6 @@ private final class Session: @unchecked Sendable {
         }
     }
 
-    static func kind(_ name: String) -> RenderedAttachment.Kind {
-        switch name {
-        case "image": .image
-        case "video": .video
-        case "audio": .audio
-        default: .file
-        }
-    }
 
     func enqueue(source: URL, original: String, keepOriginal: Bool, converted: String?, conversion: Conversion?,
                  date: Date?, key: String, thread: ThreadRef, note: AttachmentNote) {

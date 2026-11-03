@@ -47,6 +47,8 @@ enum PDFLayout {
     struct Page {
         var rows: [Placed] = []
         var continues: Int?
+        /// The entries whose first row is on this page (an exhibit cites each one's page).
+        var starts: [Int] = []
     }
 
     // MARK: Text
@@ -128,6 +130,7 @@ enum PDFLayout {
                     newPage(continuing: i > 0 ? block.entry : nil)
                 }
                 pages[pages.count - 1].rows.append(Placed(row: row, y: y))
+                if i == 0, let entry = block.entry { pages[pages.count - 1].starts.append(entry) }
                 y += row.height
             }
             y += block.spaceAfter
