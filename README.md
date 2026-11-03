@@ -9,12 +9,13 @@ One export can produce:
 - **Transcripts:** a formal record with Bates numbering, pagination and SHA-256 integrity
   hashes, as HTML and PDF. From a transcript, an **exhibit** of only the messages you pick
   (File ▸ Search an Archive… ▸ New Exhibit…), numbered on, with each message's place in the
-  full transcript and every gap marked.
+  full transcript and every gap marked, and redactions with a log (the unredacted copy beside
+  it, the same pages).
 - **Markdown and JSON:** clean text and structured data for LLMs and research.
 - **Message Explorer:** in every archive, `explorer.html` browses it like a messaging app,
   people and conversations side by side, offline in any browser.
 
-It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since, and File ▸ Search an Archive… finds any message. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved). A Platform filter shows and exports only iMessage, SMS, RCS or other services' messages.
+It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since (Settings ▸ Automatic updates does it daily or weekly on its own), and File ▸ Search an Archive… finds any message, and, when chosen, words in photos and voice notes, read on the Mac. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved). A Platform filter shows and exports only iMessage, SMS, RCS or other services' messages.
 
 Other apps' messages come from **plug-ins**, downloaded separately and installed from the app
 (File ▸ Install Plug-in…): each must be signed by RYSYS and runs with no network access. The

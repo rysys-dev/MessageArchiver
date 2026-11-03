@@ -32,6 +32,9 @@ public struct ExportOptions: Sendable, Equatable {
     public var convertMedia = true
     /// Keep the original beside a converted copy; on by default for legal integrity.
     public var keepOriginals = true
+    /// Read text in photos and what voice notes say, on this Mac, for search and the JSON
+    /// (Milestone 26, R12); off unless chosen (decision 2026-11-02).
+    public var recognizeText = false
     public var style = Style.traditional
     public var transcript = TranscriptOptions()
 
@@ -166,6 +169,9 @@ public struct ExportProgress: Sendable, Equatable {
     /// Files hashed for the manifest, of how many (spec §10).
     public var hashed = 0
     public var toHash = 0
+    /// Photos and voice notes read for their text (Milestone 26), of how many.
+    public var recognized = 0
+    public var toRecognize = 0
 
     public init(expectedMessages: Int = 0) {
         self.expectedMessages = expectedMessages
@@ -212,6 +218,9 @@ public struct ExportResult: Sendable {
     /// Messages an update kept from the archive because their sources no longer hold them
     /// (audit H7): Messages keeping only a year, a message deleted on the phone.
     public var keptFromArchive = 0
+    /// Photos and voice notes whose text was read (Milestone 26), and why any weren't.
+    public var recognized = 0
+    public var recognitionNote: String?
 }
 
 /// "1 message", "2 messages", with the number formatted for the user's locale.

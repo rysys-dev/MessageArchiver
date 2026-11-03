@@ -26,6 +26,20 @@ enum PDFLayout {
         var content: Content
         var height: CGFloat
         var indent: CGFloat = 0
+        /// An image an exhibit redacts (Milestone 24): its redaction's number.
+        var redaction: Int? = nil
+    }
+
+    /// Text an exhibit redacts carries this attribute (its redaction's number) through layout,
+    /// so both copies are laid out alike and only drawn differently (Milestone 24).
+    static let redactionKey = NSAttributedString.Key("MessageArchiverRedaction")
+
+    /// How redacted text is drawn: not at all, with a black box in its place (the redacted
+    /// copy, each box labelled where its label fits), or highlighted (the unredacted copy).
+    enum Marking {
+        case plain
+        case redacted(labels: [Int: String])
+        case highlighted
     }
 
     /// Rows that belong together: a cover, or one transcript entry.
@@ -150,6 +164,7 @@ enum PDFLayout {
         var title: String
         var author: String
         var creator: String
+        var marking: Marking = .plain
     }
 
     /// Draws the pages to `url`, written under a hidden name and moved into place when done,
@@ -181,9 +196,28 @@ enum PDFLayout {
                 let rowTop = topY - placed.y
                 switch placed.row.content {
                 case .line(let line, let ascent):
-                    put(line, x: margin + placed.row.indent, baseline: rowTop - ascent, ctx)
+                    if case .plain = d.marking {
+                        put(line, x: margin + placed.row.indent, baseline: rowTop - ascent, ctx)
+                    } else {
+                        putMarked(line, x: margin + placed.row.indent, baseline: rowTop - ascent, marking: d.marking, ctx)
+                    }
                 case .image(let image, let size):
-                    ctx.draw(image, in: CGRect(x: margin + placed.row.indent, y: rowTop - size.height - 2, width: size.width, height: size.height))
+                    let rect = CGRect(x: margin + placed.row.indent, y: rowTop - size.height - 2, width: size.width, height: size.height)
+                    switch (placed.row.redaction, d.marking) {
+                    case (let id?, .redacted(let labels)):
+                        ctx.setFillColor(gray: 0, alpha: 1)
+                        ctx.fill(rect)
+                        if let label = labels[id] { putLabel(label, in: rect, ctx) }
+                    case (_?, .highlighted):
+                        ctx.draw(image, in: rect)
+                        ctx.setStrokeColor(red: 0.89, green: 0.36, blue: 0.56, alpha: 1)
+                        ctx.setLineWidth(3)
+                        ctx.stroke(rect.insetBy(dx: -2, dy: -2))
+                        ctx.setStrokeColor(gray: 0.75, alpha: 1)
+                        ctx.setLineWidth(0.5)
+                    default:
+                        ctx.draw(image, in: rect)
+                    }
                 }
             }
 
@@ -206,6 +240,54 @@ enum PDFLayout {
     static func put(_ line: CTLine, x: CGFloat, baseline: CGFloat, _ ctx: CGContext) {
         ctx.textPosition = CGPoint(x: x, y: baseline)
         CTLineDraw(line, ctx)
+    }
+
+    /// A line run by run: a redacted run is a black box (its glyphs never drawn, so the PDF
+    /// holds no trace of them), or drawn over a highlight.
+    static func putMarked(_ line: CTLine, x: CGFloat, baseline: CGFloat, marking: Marking, _ ctx: CGContext) {
+        for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+            let id = (CTRunGetAttributes(run) as NSDictionary)[redactionKey] as? Int
+            ctx.textPosition = CGPoint(x: x, y: baseline)
+            guard let id else {
+                CTRunDraw(run, ctx, CFRange())
+                continue
+            }
+            var ascent: CGFloat = 0, descent: CGFloat = 0
+            let width = CGFloat(CTRunGetTypographicBounds(run, CFRange(), &ascent, &descent, nil))
+            var origin = CGPoint.zero
+            CTRunGetPositions(run, CFRange(location: 0, length: 1), &origin)
+            let box = CGRect(x: x + origin.x, y: baseline - descent - 1, width: width, height: ascent + descent + 2)
+            switch marking {
+            case .redacted(let labels):
+                ctx.setFillColor(gray: 0, alpha: 1)
+                ctx.fill(box)
+                if let label = labels[id] { putLabel(label, in: box, ctx) }
+            case .highlighted:
+                // Pink, not a highlighter's yellow: it marks what the other copy hides.
+                ctx.setFillColor(red: 1, green: 0.80, blue: 0.87, alpha: 1)
+                ctx.fill(box)
+                ctx.textPosition = CGPoint(x: x, y: baseline)
+                CTRunDraw(run, ctx, CFRange())
+            case .plain:
+                CTRunDraw(run, ctx, CFRange())
+            }
+        }
+    }
+
+    /// A box's label in white, the whole of it where it fits, else its number ("[2]"), else none.
+    static func putLabel(_ label: String, in box: CGRect, _ ctx: CGContext) {
+        let size = min(7.5, max(5, box.height * 0.6))
+        let number = label.split(separator: " ").first.map(String.init) ?? label
+        for text in [label, number] {
+            let attributed = NSAttributedString(string: text, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font(size, bold: true),
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 1),
+            ])
+            let line = CTLineCreateWithAttributedString(attributed as CFAttributedString)
+            guard width(line) <= box.width - 4, size <= box.height else { continue }
+            put(line, x: box.minX + 2, baseline: box.midY - size * 0.35, ctx)
+            return
+        }
     }
 
     static func putRight(_ line: CTLine, right: CGFloat, baseline: CGFloat, _ ctx: CGContext) {

@@ -119,7 +119,7 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 | `source` | `{path, platform, description, sha256}` | *always*. The database that was read (`platform` `macos`), or the iPhone backup folder (`ios`, with `description` naming the device, iOS version, backup date and whether it is encrypted; null for `macos`). `sha256` is the database's, or the backup's `Manifest.db`'s, when the export began (null if it couldn't be read) |
 | `range` | `{from, to}` | *always*. Inclusive local days, or null for open-ended |
 | `services` | [string] or null | *always* (since Milestone 14). The Platform filter: the only services exported (`["SMS", "RCS"]`), or null when every service was |
-| `options` | object | *always*. `formats` (`html`, `markdown`, `json`, `transcript`), `attachment_layout`, `convert_media`, `keep_originals`, `style`, `bates_prefix`, `bates_start` |
+| `options` | object | *always*. `formats` (`html`, `markdown`, `json`, `transcript`), `attachment_layout`, `convert_media`, `keep_originals`, `recognize_text` (since 1.3.2: text read in photos and voice notes), `style`, `bates_prefix`, `bates_start` |
 | `counts` | object | *always*. `conversations`, `messages`, `attachments_copied`, `converted`, `missing`, `kept_original`, `not_copied` |
 | `sources[]` | object | *always* (since Milestone 16). Every source read: `id`, `path`, `description`, `sha256`, and `failed` (why it couldn't be read during this export, or null) |
 | `conversations[]` | object | *always*. `id` (as `thread.id`), `source` (as `thread.source`), `parts` (as `thread.parts`), `incomplete` (true when a source it draws on failed), `title`, `is_group`, `files` (format → path; a transcript adds `transcript` for the PDF and `transcript_html`), `bates` (`{first, last, pages}` when a transcript was written, else null), `message_count`, `attachment_count`, `first_date`, `last_date` |
@@ -127,6 +127,18 @@ Every field of the engine's message line (spec §3.2, documented field by field 
 | `kept_original[]` | object | *always*. `conversation`, `date`, `filename`, `reason`: couldn't be converted, so the original is in the archive |
 | `not_copied[]` | object | *always*. `conversation`, `date`, `filename`, `reason`: on the Mac, but couldn't be copied |
 | `stopped` | boolean | *always*. True if the export was stopped before it finished |
+
+## `JSON/recognized.json` (when text in photos and voice notes is read)
+
+Text this Mac read in photos and heard in voice notes (Milestone 26), on the Mac itself. **Not
+what was sent**, and it may contain errors: a message's own JSON never holds it. Only when the
+export's "Read text in photos and voice notes" was chosen; a conversation rebuilt by an update
+has its entries replaced, the others are kept.
+
+| Field | Type | |
+|---|---|---|
+| `format`, `version`, `about` | string, integer, string | *always*. `"MessageArchiver recognized text"`, `1`, and a sentence saying what this is |
+| `files[]` | object | *always*. One per photo or voice note with text, by `path`: `conversation` (the conversation's key, as in the Explorer: `<source>-<id>`), `message_guid`, `path` (in the archive), `kind` (`photo` or `voice`), `text` |
 
 ## `manifest.json` and `SHA256SUMS.txt` (every export)
 

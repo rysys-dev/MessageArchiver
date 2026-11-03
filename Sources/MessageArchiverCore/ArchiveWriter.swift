@@ -372,6 +372,9 @@ private final class Session: @unchecked Sendable {
     var keptFromArchive = 0
     /// In an update, the GUIDs each conversation was written with, to check none is lost.
     var guidsIn: [ThreadRef: Set<String>] = [:]
+    /// Photos and voice notes to read for their text once copied (Milestone 26).
+    var recognizable: [(guid: String, thread: ThreadRef, path: String, filename: String, kind: Recognition.Kind)] = []
+    var recognizedFound: [Recognition.Found] = []
     /// How many Explorer parts each conversation written in this run has.
     var explorerParts: [ThreadRef: Int] = [:]
 
@@ -472,6 +475,14 @@ private final class Session: @unchecked Sendable {
         // message itself is drawn instead, as imessage-exporter does.
         let files = m.attachments.filter { $0.appPayload != true }
         let attachments = files.map { plan($0, message: m, thread: thread, source: source) }
+        if request.options.recognizeText {
+            for a in attachments {
+                guard let primary = a.primary, a.kind == .image || a.kind == .audio else { continue }
+                lock.withLock {
+                    recognizable.append((m.guid, id, JSONWriter.fromRoot(primary), a.filename, a.kind == .image ? .photo : .voice))
+                }
+            }
+        }
         let reply = m.replyToGuid.flatMap { search.quote($0) }
         // JSON keeps each message's own thread and source: a conversation can span sources.
         var raw = writers.contains { $0.format == .json } ? (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] : nil
@@ -749,6 +760,7 @@ private final class Session: @unchecked Sendable {
         }
         // Decrypted copies are this export's own scratch files, not the user's: removed.
         if let extractFolder { try? FileManager.default.removeItem(at: extractFolder) }
+        if request.options.recognizeText, !stopped { await recognize() }
         let footer = "Exported by MessageArchiver \(HTML.escape(AppVersion.full)) on \(HTML.escape(exported))"
             + (stopped ? " · <b>This export was stopped before it finished.</b>" : "")
         // A conversation already in the archive that this run couldn't write in full stays as
@@ -815,6 +827,7 @@ private final class Session: @unchecked Sendable {
         if writers.contains(where: { $0.format == .json }) {
             try writeArchiveJSON(records, stopped: stopped, hashes: hashes)
             try writePeopleJSON(records)
+            if request.options.recognizeText { try writeRecognizedJSON(written) }
         }
         try writeIndex(records, stopped: stopped, footer: footer)
         try writeExplorer(records, stopped: stopped, footer: footer)
@@ -1176,7 +1189,7 @@ private final class Session: @unchecked Sendable {
             "range": ["from": orNull(request.from), "to": orNull(request.to)],
             "services": orNull(request.services),
             "options": ["formats": o.formats.sorted().map(\.rawValue), "attachment_layout": o.layout.rawValue,
-                        "convert_media": o.convertMedia, "keep_originals": o.keepOriginals, "style": o.style,
+                        "convert_media": o.convertMedia, "keep_originals": o.keepOriginals, "recognize_text": o.recognizeText, "style": o.style,
                         "bates_prefix": o.transcript.batesPrefix, "bates_start": o.transcript.batesStart],
             "counts": ["conversations": records.count, "messages": records.reduce(0) { $0 + $1.messages },
                        "attachments_copied": r.attachmentsCopied, "converted": r.converted,
@@ -1247,4 +1260,36 @@ private final class TrashCounter: @unchecked Sendable {
     private var n = 0
     func add() { lock.withLock { n += 1 } }
     var count: Int { lock.withLock { n } }
+}
+
+// MARK: Text in photos and voice notes (Milestone 26)
+
+extension Session {
+    /// Reads each copied photo and voice note, from the archive's cache when its file was read
+    /// before, and adds what was read to the search entry of its message.
+    func recognize() async {
+        let items = lock.withLock { recognizable }.map {
+            Recognition.Item(guid: $0.guid, thread: $0.thread, path: $0.path, filename: $0.filename, kind: $0.kind)
+        }
+        guard !items.isEmpty else { return }
+        let read = await Recognition.read(items, root: root, hashCache: hashCache) { [self] done, total in
+            lock.withLock { progress.recognized = done; progress.toRecognize = total }
+            maybeReport()
+        }
+        for (guid, text) in read.byMessage { search.appendBody(guid: guid, text) }
+        lock.withLock {
+            recognizedFound = read.found
+            result.recognized = read.found.count
+            result.recognitionNote = read.voiceSkipped ? Recognition.voiceSkippedNote : nil
+        }
+    }
+
+    /// `JSON/recognized.json`: every photo's and voice note's text in the archive, as this Mac
+    /// read it; a rebuilt conversation's entries replaced, the others' kept.
+    func writeRecognizedJSON(_ written: [ExportThread]) throws {
+        let url = root.appendingPathComponent("JSON/recognized.json")
+        let rebuilt = Set(written.map { Explorer.key($0.id) })
+        let kept = Recognition.jsonEntries(url).filter { !rebuilt.contains($0["conversation"] as? String ?? "") }
+        try placeAndCount(Recognition.json(kept + lock.withLock { recognizedFound }.map(Recognition.entry)), url)
+    }
 }

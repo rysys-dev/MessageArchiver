@@ -52,6 +52,35 @@ cp THIRD-PARTY-NOTICES.txt "${STAGING}/Contents/Resources/THIRD-PARTY-NOTICES.tx
 # Conversation styles (decision Q3): Styles/<name>/style.css + page.html.
 cp -R Styles "${STAGING}/Contents/Resources/Styles"
 
+# Updates on a schedule (Milestone 25): the launch agent the app registers (SMAppService) when
+# a schedule is chosen. Twice a day (and on wake, if the Mac slept through one) it opens the app
+# hidden; the app updates the archives if they are due, and quits. The app does the work, so its
+# own Full Disk Access applies; if it is already open, `open` does nothing and the app's own
+# check runs it.
+mkdir -p "${STAGING}/Contents/Library/LaunchAgents"
+cat > "${STAGING}/Contents/Library/LaunchAgents/com.rysys.MessageArchiver.scheduled-update.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>                <string>com.rysys.MessageArchiver.scheduled-update</string>
+    <key>AssociatedBundleIdentifiers</key> <array><string>com.rysys.MessageArchiver</string></array>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/open</string><string>-g</string><string>-j</string>
+        <string>-b</string><string>com.rysys.MessageArchiver</string>
+        <string>--args</string><string>--scheduled-update</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
+    </array>
+    <key>ProcessType</key>          <string>Background</string>
+</dict>
+</plist>
+PLIST
+
 # Icon Composer document → Assets.car + AppIcon.icns. actool ships only with Xcode.
 if [ -d "Icon/AppIcon.icon" ]; then
     xcrun actool "Icon/AppIcon.icon" --compile "${STAGING}/Contents/Resources" \
@@ -80,6 +109,7 @@ cat > "${STAGING}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>     <true/>
     <key>NSHumanReadableCopyright</key>    <string>© 2026 RYSYS · GPL-3.0</string>
     <key>NSContactsUsageDescription</key>  <string>MessageArchiver shows the names of the people in your conversations instead of their phone numbers and email addresses. Contacts are only read, on this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key> <string>When you choose to read text in photos and voice notes, MessageArchiver turns voice notes into text for searching your archive. It is done on this Mac only; nothing is sent anywhere.</string>
     <!-- Plug-ins (Milestone 17): a .maplugin opened in Finder installs, after asking. -->
     <key>UTExportedTypeDeclarations</key>
     <array><dict>

@@ -56,7 +56,7 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; <a href="#exhibits">exhibits of chosen messages</a>, new in 1.3.1, are described below.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; what came after is described below: <a href="#exhibits">exhibits of chosen messages</a> (1.3.1), and in 1.3.2 their <a href="#redaction">redaction</a>, <a href="#automatic-updates">automatic updates</a> and <a href="#text-in-photos">text in photos and voice notes</a>.</p>
 
 <nav aria-label="Contents">
   <ol>
@@ -146,8 +146,8 @@ th { color: var(--muted); font-weight: 600; }
   <tr><td><code>attachment-notes.html</code></td><td>Attachments that are missing, couldn't be copied, or were kept in their original format, by conversation; linked from the index. Only when there are some.</td></tr>
   <tr><td><code>Conversations/</code></td><td>The conversation pages.</td></tr>
   <tr><td><code>Transcripts/</code></td><td>PDF and HTML transcripts, and the Bates ranges.</td></tr>
-  <tr><td><code>Exhibits/</code></td><td><a href="#exhibits">Exhibits of chosen messages</a>, PDF and HTML, one file per version. Only once you make one.</td></tr>
-  <tr><td><code>Markdown/</code>, <code>JSON/</code></td><td>One file per conversation; <code>JSON/</code> also has <code>people.json</code> and <code>archive.json</code>.</td></tr>
+  <tr><td><code>Exhibits/</code></td><td><a href="#exhibits">Exhibits of chosen messages</a>, PDF and HTML, one file per version, and an unredacted copy beside a redacted one. Only once you make one.</td></tr>
+  <tr><td><code>Markdown/</code>, <code>JSON/</code></td><td>One file per conversation; <code>JSON/</code> also has <code>people.json</code> and <code>archive.json</code>, and <code>recognized.json</code> when <a href="#search">text in photos and voice notes</a> was read.</td></tr>
   <tr><td><code>Attachments/</code></td><td>Photos, videos, voice notes and files, named by date, each dated as it was sent.</td></tr>
   <tr><td><code>manifest.json</code>, <code>SHA256SUMS.txt</code></td><td>The size and SHA-256 of every file, to prove nothing changed.</td></tr>
 </table></div>
@@ -167,6 +167,9 @@ th { color: var(--muted); font-weight: 600; }
 <h2 id="update">Update an archive</h2>
 <p><span class="menu">File › Update Archive…</span> (<kbd>⇧⌘U</kbd>), or <strong>Update an existing archive…</strong> on the dashboard, adds what's new since the archive was made, with the same choices. Only conversations with new or edited messages are rebuilt. An update never loses a message the archive has: one Messages (or another source) no longer holds, because it keeps messages for a year or a message was deleted on the phone, stays in the archive. The files it replaces go to the Trash (or, on a drive without one, to a <code>RYSYS Trash</code> folder on that drive). An update you stop leaves the conversations already in the archive as they were.</p>
 
+<h3 id="automatic-updates">Automatic updates</h3>
+<p>In <span class="menu">MessageArchiver › Settings…</span>, under <strong>Automatic updates</strong>, choose <strong>Daily</strong> or <strong>Weekly</strong> and <strong>Add Archive…</strong> for each archive to keep current. Around 12:30 or 20:30 (or when the Mac next wakes, if it slept through), MessageArchiver opens hidden, updates them as above, and quits; if it's already open, it does the same in place. You get a notification only when something needs you, such as an archive whose drive isn't connected; Settings shows what each archive's last update added. This matters if Messages keeps messages for only a year or 30 days: an archive kept current has them before they go. The first time, macOS may ask you to allow MessageArchiver under <span class="menu">System Settings › General › Login Items &amp; Extensions</span>. Archives made from an iPhone backup aren't updated this way.</p>
+
 <h2 id="verify">Verify an archive</h2>
 <p><span class="menu">File › Verify Archive…</span> checks every file against the manifest and lists any that changed, went missing or were added. Anyone can check it without MessageArchiver too: in Terminal, in the archive folder, run <code>shasum -a 256 -c SHA256SUMS.txt</code>.</p>
 
@@ -182,7 +185,14 @@ th { color: var(--muted); font-weight: 600; }
 </ol>
 <p>The exhibit is <code>Exhibits/&lt;name&gt; v1.pdf</code> (and <code>.html</code>). Its cover says which transcript it was taken from and which entries it shows. Each message keeps its entry number and has its page in the full transcript beside it, and a line such as "[Entries #5–#16 are not in this exhibit]" marks every gap, so nobody can mistake a selection for the whole conversation. The words, senders and attachment exhibit numbers are exactly the transcript's.</p>
 <p>The exhibit is saved in the archive. Choose it from the <strong>Exhibits</strong> menu in the Search window to change the messages and make it again: that makes <code>v2</code>, with new Bates numbers, and leaves <code>v1</code> as it was, in case it has already been sent. The archive's manifest includes every exhibit, so Verify still passes.</p>
+<h3 id="redaction">Redaction</h3>
+<p>In the exhibit window, under <strong>Redactions</strong>, type words or a phone number to black out everywhere in the exhibit (its cover and sender names included; a phone number is found however it is written), choose a reason (Personal information, Privileged, Not relevant, or your own), and click <strong>Redact</strong>. Right-click a message to redact its text or its attachments. <strong>Tick All</strong> makes a redacted copy of the whole conversation.</p>
+<p>The exhibit shows a black box in place of each, labelled with its number and reason where it fits, and ends with a redaction log: what kind of thing each one hid, where, and why, never the words themselves. The hidden text is removed from the file, not covered over, so it can't be copied or searched. Beside it, <code>&lt;name&gt; v1 (unredacted).pdf</code> has the same pages and Bates numbers, with what the other hides highlighted in pink and UNREDACTED COPY on every page, for a judge's review or your own files; send it only if you mean to. The archive's own transcript is never redacted.</p>
 <p>A transcript made by MessageArchiver 1.3.0 or earlier didn't keep what an exhibit needs. The first time you make an exhibit from one, MessageArchiver offers to <strong>rebuild the transcript</strong> from the archive: the same messages, with the archive's next Bates numbers. The old transcript stays beside it, its name ending "(made &lt;date&gt;)", so numbers already sent out still point to the same pages.</p>
+
+<h3 id="text-in-photos">Text in photos and voice notes</h3>
+<p>Tick <strong>Read text in photos and voice notes</strong> when you export, and search also finds words in the photos (a receipt's total, a screenshot, a sign) and in what voice notes say. It's done on your Mac by macOS itself; nothing is sent anywhere, and a voice note in a language your Mac can't read on its own is skipped, with a note saying so. A result found this way says "Found in a photo or voice note, as read by this Mac", since it's not what was sent and may contain mistakes. The text is also in <code>JSON/recognized.json</code>, never in the conversation pages or transcripts. It's off unless you choose it, because the first export takes longer; updates read only new files. The first time, macOS asks to allow Speech Recognition for voice notes.</p>
+<p>For an archive you already have, choose <span class="menu">File › Read Text in Photos and Voice Notes…</span>: it reads the photos and voice notes already in the archive (Messages and the phone aren't needed), and from then on that archive's updates read new ones too. Files read before are skipped, so running it again is quick.</p>
 
 <h2 id="iphone">iPhone backups</h2>
 <p>MessageArchiver can read a backup of an iPhone made with Finder instead of this Mac's Messages, which helps when the iPhone has older messages than the Mac.</p>

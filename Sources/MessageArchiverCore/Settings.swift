@@ -31,6 +31,7 @@ public struct SavedSettings: Sendable, Hashable, Codable {
     public var layout = AttachmentLayout.byPerson
     public var convertMedia = true
     public var keepOriginals = true
+    public var recognizeText = false
     /// The export folder chosen for each source of the `export` kind (Milestone 20), by source
     /// id: read again on every launch.
     public var exportFolders: [String: String] = [:]
@@ -49,6 +50,7 @@ public struct SavedSettings: Sendable, Hashable, Codable {
         layout = c.value(.layout, d.layout)
         convertMedia = c.value(.convertMedia, d.convertMedia)
         keepOriginals = c.value(.keepOriginals, d.keepOriginals)
+        recognizeText = c.value(.recognizeText, d.recognizeText)
         exportFolders = c.value(.exportFolders, d.exportFolders)
     }
 
@@ -60,6 +62,7 @@ public struct SavedSettings: Sendable, Hashable, Codable {
             o.layout = layout
             o.convertMedia = convertMedia
             o.keepOriginals = keepOriginals
+            o.recognizeText = recognizeText
             return o
         }
         set {
@@ -68,6 +71,7 @@ public struct SavedSettings: Sendable, Hashable, Codable {
             layout = newValue.layout
             convertMedia = newValue.convertMedia
             keepOriginals = newValue.keepOriginals
+            recognizeText = newValue.recognizeText
         }
     }
 }

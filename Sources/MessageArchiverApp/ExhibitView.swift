@@ -16,6 +16,11 @@ final class ExhibitModel {
     private(set) var exhibit: Exhibit
     var name: String
     var chosen: Set<String>
+    /// What the exhibit redacts (Milestone 24), and the one being added.
+    var redactions: [Redaction]
+    var newTerm = ""
+    var reason = Redaction.reasons[0]
+    var otherReason = ""
     private(set) var candidates: [ExhibitCandidate] = []
     private(set) var needsRebuild = false
     var prefix: String
@@ -34,6 +39,7 @@ final class ExhibitModel {
         exhibit = saved ?? Exhibit(name: "", thread: thread, title: title, guids: [])
         name = saved?.name ?? ""
         chosen = Set(saved?.guids ?? [])
+        redactions = saved?.redactions ?? []
         let next = Exhibits.nextBates(root)
         prefix = next.prefix
         start = next.start
@@ -70,6 +76,52 @@ final class ExhibitModel {
         anchor = i
     }
 
+    /// The reason chosen, or the one typed for Other.
+    var reasonGiven: String? {
+        if reason != "Other" { return reason }
+        let typed = otherReason.trimmingCharacters(in: .whitespaces)
+        return typed.isEmpty ? nil : typed
+    }
+
+    private var nextId: Int { (redactions.map(\.id).max() ?? 0) + 1 }
+
+    func addTerm() {
+        let term = newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty, let reason = reasonGiven,
+              !redactions.contains(where: { $0.kind == .term && $0.term?.caseInsensitiveCompare(term) == .orderedSame }) else { return }
+        redactions.append(Redaction(id: nextId, kind: .term, term: term, reason: reason))
+        newTerm = ""
+    }
+
+    func redactText(_ c: ExhibitCandidate) {
+        guard let reason = reasonGiven, !redactions.contains(where: { $0.kind == .message && $0.guid == c.guid }) else { return }
+        redactions.append(Redaction(id: nextId, kind: .message, guid: c.guid, reason: reason))
+        chosen.insert(c.guid)
+    }
+
+    func redactAttachments(_ c: ExhibitCandidate) {
+        guard let reason = reasonGiven, c.attachments > 0,
+              !redactions.contains(where: { $0.kind == .attachment && $0.guid == c.guid }) else { return }
+        redactions.append(Redaction(id: nextId, kind: .attachment, guid: c.guid, reason: reason))
+        chosen.insert(c.guid)
+    }
+
+    func remove(_ r: Redaction) { redactions.removeAll { $0.id == r.id } }
+
+    /// How the editor names a redaction: here the words themselves may show.
+    func describe(_ r: Redaction) -> String {
+        switch r.kind {
+        case .term: return "“\(r.term ?? "")” everywhere"
+        case .message, .attachment:
+            let n = candidates.first { $0.guid == r.guid }.map { "#\($0.number)" } ?? "a message"
+            return r.kind == .message ? "The text of \(n)" : "The attachments of \(n)"
+        }
+    }
+
+    func marks(_ c: ExhibitCandidate) -> [String] {
+        redactions.filter { $0.guid == c.guid }.map { $0.kind == .message ? "text redacted" : "attachments redacted" }
+    }
+
     var canMake: Bool {
         working == nil && !chosen.isEmpty && !name.trimmingCharacters(in: .whitespaces).isEmpty
             && !prefix.isEmpty && start >= 1
@@ -99,6 +151,7 @@ final class ExhibitModel {
         draft.name = name.trimmingCharacters(in: .whitespaces)
         // Kept in the transcript's order, whatever order they were ticked in.
         draft.guids = candidates.map(\.guid).filter(chosen.contains)
+        draft.redactions = redactions
         do {
             exhibit = try await Exhibits.make(draft, root: root, prefix: prefix, start: start, trash: .standard())
             made = exhibit.versions.last
@@ -145,7 +198,7 @@ struct ExhibitView: View {
             }
         }
         .padding(20)
-        .frame(width: 720, height: 640)
+        .frame(width: 760, height: 760)
     }
 
     private var chooser: some View {
@@ -154,9 +207,15 @@ struct ExhibitView: View {
                 .textFieldStyle(.roundedBorder)
             ScrollViewReader { proxy in
                 List(model.candidates) { c in
-                    CandidateRow(candidate: c, on: model.chosen.contains(c.guid), focused: c.guid == model.focus)
+                    CandidateRow(candidate: c, on: model.chosen.contains(c.guid), focused: c.guid == model.focus, marks: model.marks(c))
                         .contentShape(Rectangle())
                         .onTapGesture { model.toggle(c, shift: NSEvent.modifierFlags.contains(.shift)) }
+                        .contextMenu {
+                            Button("Redact This Message’s Text") { model.redactText(c) }
+                                .disabled(c.text.isEmpty)
+                            Button("Redact Its Attachments") { model.redactAttachments(c) }
+                                .disabled(c.attachments == 0)
+                        }
                         .id(c.guid)
                 }
                 .listStyle(.bordered)
@@ -167,9 +226,12 @@ struct ExhibitView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button("Tick All") { model.chosen = Set(model.candidates.map(\.guid)) }
+                    .disabled(model.chosen.count == model.candidates.count)
                 Button("Untick All") { model.chosen = [] }
                     .disabled(model.chosen.isEmpty)
             }
+            redactionsBox
             HStack(spacing: 8) {
                 Text("Bates numbers from").foregroundStyle(.secondary)
                 TextField("Prefix", text: $model.prefix).frame(width: 70)
@@ -191,6 +253,52 @@ struct ExhibitView: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.canMake)
             }
+        }
+    }
+
+    /// Redactions (Milestone 24): words or a number everywhere, or (right-click a message) its
+    /// text or attachments; each with a reason.
+    private var redactionsBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(model.redactions) { r in
+                    HStack {
+                        Text("[\(r.id)]").monospacedDigit().foregroundStyle(.secondary)
+                        Text(model.describe(r)).lineLimit(1)
+                        Text("· \(r.reason)").foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        Button { model.remove(r) } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless)
+                            .help("Don’t redact this")
+                    }
+                    .font(.callout)
+                }
+                HStack(spacing: 6) {
+                    TextField("Redact", text: $model.newTerm, prompt: Text("Words or a phone number to redact everywhere"))
+                        .onSubmit { model.addTerm() }
+                    Picker("Reason", selection: $model.reason) {
+                        ForEach(Redaction.reasons, id: \.self) { Text($0).tag($0) }
+                        Text("Other…").tag("Other")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    if model.reason == "Other" {
+                        TextField("Reason", text: $model.otherReason, prompt: Text("Reason")).frame(width: 110)
+                    }
+                    Button("Redact") { model.addTerm() }
+                        .disabled(model.newTerm.trimmingCharacters(in: .whitespaces).isEmpty || model.reasonGiven == nil)
+                }
+                .textFieldStyle(.roundedBorder)
+                Text(model.redactions.isEmpty
+                     ? "Right-click a message to redact its text or attachments, with the reason chosen here."
+                     : "The exhibit shows a black box for each, and a log at the end; an unredacted copy with the same pages is made beside it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(4)
+        } label: {
+            Text("Redactions").font(.callout.weight(.semibold))
         }
     }
 
@@ -224,6 +332,9 @@ struct ExhibitView: View {
                 GridRow { Text("Bates").foregroundStyle(.secondary); Text("\(v.first) – \(v.last) (\(Plural.count(v.pages, "page")))") }
                 GridRow { Text("Messages").foregroundStyle(.secondary); Text("\(v.entries.formatted())") }
                 GridRow { Text("From").foregroundStyle(.secondary); Text("\(v.transcript), Bates \(v.transcriptBates)") }
+                if let copy = v.unredactedPdf {
+                    GridRow { Text("Redactions").foregroundStyle(.secondary); Text("\(v.redactions ?? 0); the unredacted copy, with the same pages, is \(copy)").fixedSize(horizontal: false, vertical: true) }
+                }
             }
             Text("Saved in the archive: choose it from the Exhibits menu to make it again.")
                 .font(.callout)
@@ -232,6 +343,9 @@ struct ExhibitView: View {
             HStack {
                 Button("Show in Finder") { model.reveal(v.pdf) }
                 Button("Open PDF") { model.open(v.pdf) }
+                if let copy = v.unredactedPdf {
+                    Button("Open Unredacted Copy") { model.open(copy) }
+                }
                 Spacer()
                 Button("Done", action: done).keyboardShortcut(.defaultAction)
             }
@@ -243,6 +357,7 @@ private struct CandidateRow: View {
     let candidate: ExhibitCandidate
     let on: Bool
     let focused: Bool
+    let marks: [String]
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -256,6 +371,10 @@ private struct CandidateRow: View {
                 HStack {
                     Text(candidate.sender).font(.callout.weight(.semibold)).lineLimit(1)
                     Spacer()
+                    ForEach(marks, id: \.self) { m in
+                        Text(m.uppercased()).font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 4).background(.black, in: .rect(cornerRadius: 3))
+                    }
                     if candidate.attachments > 0 {
                         Label("\(candidate.attachments)", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary)
                     }

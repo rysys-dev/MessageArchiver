@@ -197,6 +197,7 @@ public struct ArchiveState: Codable, Sendable, Equatable {
         if options.formats != self.options.formats { out.append("Formats") }
         if options.layout != self.options.layout { out.append("Attachment folders") }
         if options.convertMedia != self.options.convertMedia { out.append("Converting media") }
+        if options.recognizeText != self.options.recognizeText { out.append("Reading text in photos and voice notes") }
         if options.keepOriginals != self.options.keepOriginals { out.append("Keeping originals") }
         if options.transcript.batesPrefix != self.options.transcript.batesPrefix { out.append("Bates prefix") }
         if choice.allThreads != self.choice.allThreads || (!choice.allThreads && Set(choice.threads) != Set(self.choice.threads)) {
@@ -210,7 +211,7 @@ public struct ArchiveState: Codable, Sendable, Equatable {
 }
 
 extension ExportOptions: Codable {
-    enum CodingKeys: String, CodingKey { case formats, layout, convertMedia, keepOriginals, style, transcript }
+    enum CodingKeys: String, CodingKey { case formats, layout, convertMedia, keepOriginals, recognizeText, style, transcript }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -220,6 +221,7 @@ extension ExportOptions: Codable {
         layout = c.value(.layout, d.layout)
         convertMedia = c.value(.convertMedia, d.convertMedia)
         keepOriginals = c.value(.keepOriginals, d.keepOriginals)
+        recognizeText = c.value(.recognizeText, d.recognizeText)
         style = c.value(.style, d.style)
         transcript = c.value(.transcript, d.transcript)
     }
@@ -230,6 +232,7 @@ extension ExportOptions: Codable {
         try c.encode(layout, forKey: .layout)
         try c.encode(convertMedia, forKey: .convertMedia)
         try c.encode(keepOriginals, forKey: .keepOriginals)
+        try c.encode(recognizeText, forKey: .recognizeText)
         try c.encode(style, forKey: .style)
         try c.encode(transcript, forKey: .transcript)
     }

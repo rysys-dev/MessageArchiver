@@ -287,7 +287,11 @@ private struct ResultRow: View {
                 Text(Dates.short(hit.date ?? "")).font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             Text(hit.threadTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            Text(Self.highlighted(hit.snippet)).font(.callout).lineLimit(3)
+            if hit.inRecognizedText {
+                // What the Mac read, not what was sent (text-styles.md: about a message).
+                Text("Found in a photo or voice note, as read by this Mac").font(.caption).italic().foregroundStyle(.secondary)
+            }
+            Text(Self.highlighted(hit.snippet)).font(.callout).lineLimit(3).italic(hit.inRecognizedText)
         }
         .padding(.vertical, 3)
     }

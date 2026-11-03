@@ -196,6 +196,54 @@ final class SearchIndexWriter {
         sqlite3_step(s)
     }
 
+    /// Adds what the Mac read in a message's photos or voice notes (Milestone 26) to this run's
+    /// entry for it, so search finds it.
+    func appendBody(guid: String, _ text: String) {
+        let sql = [
+            "INSERT INTO fts(fts, rowid, body) SELECT 'delete', id, body FROM messages WHERE guid = ?1 AND id >= \(firstNew)",
+            "UPDATE messages SET body = COALESCE(body, '') || ?2 WHERE guid = ?1 AND id >= \(firstNew)",
+            "INSERT INTO fts(rowid, body) SELECT id, body FROM messages WHERE guid = ?1 AND id >= \(firstNew)",
+        ]
+        for statement in sql {
+            var s: OpaquePointer?
+            defer { sqlite3_finalize(s) }
+            guard sqlite3_prepare_v2(db, statement, -1, &s, nil) == SQLITE_OK else { continue }
+            bind(s, 1, guid)
+            if statement.contains("?2") { bind(s, 2, text) }
+            sqlite3_step(s)
+        }
+    }
+
+    /// Replaces what the Mac read in a message's photos or voice notes, in every entry for it
+    /// (Read Text in Photos and Voice Notes…, Milestone 26): the text before the first mark is
+    /// what was sent, and stays.
+    func replaceRecognized(guid: String, _ text: String) {
+        var rows: [(Int64, String)] = []
+        var s: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT id, COALESCE(body, '') FROM messages WHERE guid = ?", -1, &s, nil) == SQLITE_OK {
+            bind(s, 1, guid)
+            while sqlite3_step(s) == SQLITE_ROW {
+                rows.append((sqlite3_column_int64(s, 0), sqlite3_column_text(s, 1).map { String(cString: $0) } ?? ""))
+            }
+        }
+        sqlite3_finalize(s)
+        for (id, body) in rows {
+            let sent = ArchiveSearch.recognizedMarks.compactMap { body.range(of: $0)?.lowerBound }.min().map { String(body[..<$0]) } ?? body
+            let now = sent + text
+            guard now != body else { continue }
+            for (sql, value) in [("INSERT INTO fts(fts, rowid, body) VALUES ('delete', ?1, ?2)", body),
+                                 ("UPDATE messages SET body = ?2 WHERE id = ?1", now),
+                                 ("INSERT INTO fts(rowid, body) VALUES (?1, ?2)", now)] {
+                var u: OpaquePointer?
+                defer { sqlite3_finalize(u) }
+                guard sqlite3_prepare_v2(db, sql, -1, &u, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int64(u, 1, id)
+                bind(u, 2, value)
+                sqlite3_step(u)
+            }
+        }
+    }
+
     func finish() throws {
         try exec("COMMIT")
         try exec("INSERT INTO fts(fts) VALUES ('optimize')")
@@ -279,6 +327,8 @@ public struct SearchHit: Sendable, Identifiable, Equatable {
     public var snippet: String
     /// The message's guid: where an exhibit's list opens (Milestone 23).
     public var guid: String? = nil
+    /// The words matched only what this Mac read in its photos or voice notes (Milestone 26).
+    public var inRecognizedText = false
 }
 
 public struct SearchFilters: Sendable, Equatable {
@@ -361,7 +411,34 @@ public final class ArchiveSearch: @unchecked Sendable {
             SELECT m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, m.has_attachment, m.page, m.anchor, \(snippet), m.guid
             FROM \(from) WHERE \(whereParts.joined(separator: " AND ")) ORDER BY m.date DESC, m.id DESC LIMIT \(limit)
             """
-        return rows(sql, binds)
+        var hits = rows(sql, binds)
+        if match != nil { markRecognized(&hits) }
+        return hits
+    }
+
+    /// The part of a message's entry the Mac read (Milestone 26) starts with one of these.
+    static let recognizedMarks = ["\n[Photo text, read by this Mac: ", "\n[Voice note, heard by this Mac: "]
+
+    /// A hit whose matched words aren't in what was sent, only in what the Mac read, says so.
+    private func markRecognized(_ hits: inout [SearchHit]) {
+        for i in hits.indices {
+            let words = Self.matchedWords(hits[i].snippet)
+            guard !words.isEmpty, let body = rows("SELECT m.id, \(threadKey), m.thread_title, m.sender, m.handle, m.from_me, m.date, "
+                                                  + "m.has_attachment, m.page, m.anchor, m.body, m.guid FROM messages m WHERE m.id = ?", [hits[i].id]).first?.snippet,
+                  let cut = Self.recognizedMarks.compactMap({ body.range(of: $0)?.lowerBound }).min() else { continue }
+            let sent = body[..<cut].folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            hits[i].inRecognizedText = words.allSatisfy { !sent.contains($0) }
+        }
+    }
+
+    static func matchedWords(_ snippet: String) -> [String] {
+        var out: [String] = [], current = "", inside = false
+        for c in snippet {
+            if c == ArchiveSearch.hitStart { inside = true; current = "" }
+            else if c == ArchiveSearch.hitEnd { inside = false; if !current.isEmpty { out.append(current.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)) } }
+            else if inside { current.append(c) }
+        }
+        return out
     }
 
     /// The messages around one, in its conversation, oldest first: what a hit looks like in place.

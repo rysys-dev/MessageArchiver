@@ -18,6 +18,10 @@ public struct Exhibit: Codable, Sendable, Equatable, Identifiable {
         /// The transcript it was taken from, and that transcript's Bates range then.
         public var transcript: String
         public var transcriptBates: String
+        /// With redactions (Milestone 24): how many, and the unredacted copy's files.
+        public var redactions: Int? = nil
+        public var unredactedPdf: String? = nil
+        public var unredactedHtml: String? = nil
     }
 
     public var id: String
@@ -26,6 +30,8 @@ public struct Exhibit: Codable, Sendable, Equatable, Identifiable {
     public var title: String
     /// The messages chosen, by guid.
     public var guids: [String]
+    /// What it redacts (Milestone 24); nil or empty for none.
+    public var redactions: [Redaction]? = nil
     public var versions: [Version]
 
     public init(name: String, thread: ThreadRef, title: String, guids: [String]) {
@@ -150,6 +156,13 @@ public enum Exhibits {
             if let n = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 { sizes[path] = n }
         }
 
+        let fm = FileManager.default
+        let folder = root.appendingPathComponent(folder)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let base = freeName(ArchiveNaming.sanitize("\(exhibit.name) v\(number)", maxBytes: 160), in: folder)
+        let rules = exhibit.redactions ?? []
+        let unredacted = base + " (unredacted)"
+
         let shown = entries.indices.filter(chosen.contains)
         let shownExhibits = shown.reduce(0) { $0 + entries[$1].exhibits.count }
         let missing = shown.reduce(0) { $0 + entries[$1].exhibits.filter { $0.archivePath == nil }.count }
@@ -161,6 +174,10 @@ public enum Exhibits {
         cover.append(("This exhibit", "\(shown.count) of \(entries.count == 1 ? "1 entry" : "\(entries.count.formatted()) entries") (\(ranges(shown.map { $0 + 1 }))) · "
                       + "\(Plural.count(shownExhibits, "exhibit")) (\(missing) missing) · "
                       + "\(TranscriptDocument.timestamp(entries[shown[0]].date)) to \(TranscriptDocument.timestamp(entries[shown[shown.count - 1]].date))"))
+        if !rules.isEmpty {
+            cover.append(("Redactions", "\(Plural.count(rules.count, "redaction")), each with its reason in the log at the end. "
+                          + "An unredacted copy has the same pages and Bates numbers: “\(unredacted).pdf”."))
+        }
         cover.append(("Exhibit made", "\(display(iso.string(from: now))) by MessageArchiver \(AppVersion.full)" + (number > 1 ? "; version \(number)" : "")))
 
         let facts = TranscriptFacts(sourceKind: "", sourcePath: "", device: "", exported: now, timeZone: .current,
@@ -169,34 +186,54 @@ public enum Exhibits {
                                      letter: record.letter, entries: entries, options: options, facts: facts, hashes: hashes,
                                      sizes: sizes, archiveRoot: root, people: [:])
         doc.exhibit = .init(name: exhibit.name, chosen: chosen, cover: cover, entryPages: record.entryPages)
+        let redactor = rules.isEmpty ? nil : Redactor(rules)
+        doc.redactor = redactor
         let pages = TranscriptWriter.lay(doc, options: options, start: start)
         let first = options.bates(start), last = options.bates(start + pages.count - 1)
 
-        let fm = FileManager.default
-        let folder = root.appendingPathComponent(folder)
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        let base = freeName(ArchiveNaming.sanitize("\(exhibit.name) v\(number)", maxBytes: 180), in: folder)
         let pdfURL = folder.appendingPathComponent(base + ".pdf"), htmlURL = folder.appendingPathComponent(base + ".html")
-        let decoration = PDFLayout.Decoration(
+        var decoration = PDFLayout.Decoration(
             headerLeft: options.matter.isEmpty ? "Exhibit of Messages" : options.matter,
             headerRight: exhibit.name,
             bates: { [options] in options.bates(start + $0) },
             footerRight: "Made \(now.formatted(date: .abbreviated, time: .omitted))",
             title: "Exhibit — \(exhibit.name)",
             author: options.preparedBy.isEmpty ? "MessageArchiver" : options.preparedBy,
-            creator: "MessageArchiver \(AppVersion.full)")
-        try PDFLayout.draw(pages, decoration: decoration, to: pdfURL)
+            creator: "MessageArchiver \(AppVersion.full)",
+            marking: redactor.map { .redacted(labels: $0.labels) } ?? .plain)
+        var written: [URL] = []
         do {
+            try PDFLayout.draw(pages, decoration: decoration, to: pdfURL)
+            written.append(pdfURL)
             try Data(doc.html(bates: "\(first) – \(last)", pdfName: base + ".pdf").utf8).write(to: htmlURL, options: .withoutOverwriting)
+            written.append(htmlURL)
+            if redactor != nil {
+                // The same pages, what the other copy hides highlighted, and said on every page.
+                decoration.marking = .highlighted
+                decoration.headerLeft = "UNREDACTED COPY · " + decoration.headerLeft
+                decoration.footerRight = "Unredacted copy"
+                decoration.title += " (unredacted)"
+                let copyPDF = folder.appendingPathComponent(unredacted + ".pdf"), copyHTML = folder.appendingPathComponent(unredacted + ".html")
+                try PDFLayout.draw(pages, decoration: decoration, to: copyPDF)
+                written.append(copyPDF)
+                doc.marked = true
+                let page = doc.html(bates: "\(first) – \(last)", pdfName: unredacted + ".pdf")
+                    .replacingOccurrences(of: "<h1>Exhibit of Messages</h1>", with: "<h1>Exhibit of Messages — UNREDACTED COPY</h1>")
+                try Data(page.utf8).write(to: copyHTML, options: .withoutOverwriting)
+                written.append(copyHTML)
+            }
         } catch {
-            try? fm.removeItem(at: pdfURL)
+            for url in written { try? fm.removeItem(at: url) }
             throw error
         }
 
         var saved = exhibit
         saved.versions.append(.init(number: number, made: iso.string(from: now), pdf: "\(Self.folder)/\(base).pdf",
                                     html: "\(Self.folder)/\(base).html", first: first, last: last, pages: pages.count,
-                                    entries: shown.count, transcript: record.pdf, transcriptBates: "\(record.first) – \(record.last)"))
+                                    entries: shown.count, transcript: record.pdf, transcriptBates: "\(record.first) – \(record.last)",
+                                    redactions: rules.isEmpty ? nil : rules.count,
+                                    unredactedPdf: rules.isEmpty ? nil : "\(Self.folder)/\(unredacted).pdf",
+                                    unredactedHtml: rules.isEmpty ? nil : "\(Self.folder)/\(unredacted).html"))
         var list = read(root)
         if let i = list.firstIndex(where: { $0.id == saved.id }) { list[i] = saved } else { list.append(saved) }
         try write(list, root)
@@ -242,8 +279,9 @@ public enum Exhibits {
     static func freeName(_ name: String, in folder: URL) -> String {
         let fm = FileManager.default
         var candidate = name, n = 2
-        while fm.fileExists(atPath: folder.appendingPathComponent(candidate + ".pdf").path)
-                || fm.fileExists(atPath: folder.appendingPathComponent(candidate + ".html").path) {
+        while [".pdf", ".html", " (unredacted).pdf", " (unredacted).html"].contains(where: {
+            fm.fileExists(atPath: folder.appendingPathComponent(candidate + $0).path)
+        }) {
             candidate = "\(name) (\(n))"
             n += 1
         }

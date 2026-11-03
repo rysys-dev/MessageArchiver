@@ -719,6 +719,19 @@ final class AppState {
     var updatePlan: UpdatePlan?
     private(set) var updateError: String?
 
+    /// Updates on a schedule (Milestone 25): the choice and outcomes, and a run in progress.
+    /// While one runs, nothing is asked: what would be an alert is noted as `quietFailure`.
+    var schedule = ScheduledUpdates.load()
+    /// Read Text in Photos and Voice Notes… (Milestone 26): the archive, how far, and how it went.
+    var textReadTarget: URL?
+    var textReadProgress = (done: 0, total: 0)
+    var textReadOutcome: Recognition.ArchiveOutcome?
+    var textReadError: String?
+    var textReadTask: Task<Void, Never>?
+    var scheduleRunning = false
+    var quiet = false
+    var quietFailure: String?
+
     func chooseArchiveToUpdate() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -1300,7 +1313,11 @@ final class AppState {
         }
     }
 
-    private func inform(_ title: String, _ detail: String) {
+    func inform(_ title: String, _ detail: String) {
+        if quiet {
+            quietFailure = quietFailure ?? "\(title). \(detail)"
+            return
+        }
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = detail

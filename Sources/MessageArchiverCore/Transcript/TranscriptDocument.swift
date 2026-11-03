@@ -22,6 +22,9 @@ struct TranscriptDocument {
     /// A cover given whole, but for the Bates range: a transcript rebuilt from the archive
     /// keeps the facts of the export that made it.
     var fixedCover: [(String, String)]? = nil
+    /// An exhibit's redactions (Milestone 24); `marked` makes the HTML the unredacted copy.
+    var redactor: Redactor? = nil
+    var marked = false
 
     /// What makes a transcript an exhibit: the entries chosen (by index), the cover's lines,
     /// and each entry's page in the full transcript.
@@ -201,10 +204,12 @@ struct TranscriptDocument {
     func cover(bates: String) -> PDFLayout.Block {
         var cover: [PDFLayout.Row] = PDFLayout.rows(PDFLayout.text(title, size: 18, bold: true))
         cover += PDFLayout.rows(PDFLayout.text(" ", size: 8))
+        // An exhibit's cover says more (where it was taken from, its redactions), a little closer.
+        let compact = exhibit != nil
         for (label, value) in coverLines(bates: bates) {
             cover += PDFLayout.rows(PDFLayout.text(label.uppercased(), size: 7.5, bold: true, gray: true))
-            cover += PDFLayout.rows(PDFLayout.text(value, size: 10.5))
-            cover += PDFLayout.rows(PDFLayout.text(" ", size: 4))
+            cover += PDFLayout.rows(styled(value, size: compact ? 9.5 : 10.5, entry: nil))
+            cover += PDFLayout.rows(PDFLayout.text(" ", size: compact ? 2.5 : 4))
         }
         cover += PDFLayout.rows(PDFLayout.text(explanation, size: 8.5, italic: true, gray: true))
         return PDFLayout.Block(rows: cover, keep: cover.count, entry: nil, spaceAfter: 0)
@@ -227,7 +232,8 @@ struct TranscriptDocument {
             var exhibitNumber = firstExhibit - 1
             var head = "#\(n)    \(Self.timestamp(e.date))    "
             head += e.isEvent ? "Event" : "\(sender(e))    \(e.service)"
-            var rows = PDFLayout.rows(PDFLayout.text(head, size: 9.5, bold: true))
+            let hideText = redactor?.message(e.guid)
+            var rows = PDFLayout.rows(styled(head, size: 9.5, bold: true, entry: n))
             // In an exhibit, where the entry is in the full transcript: about it, not part of it.
             if let page = exhibitPage(i) { rows += PDFLayout.rows(PDFLayout.text("[Transcript page \(page)]", size: 8.5, italic: true, gray: true)) }
             var flags: [String] = []
@@ -240,34 +246,100 @@ struct TranscriptDocument {
             if !flags.isEmpty { rows += PDFLayout.rows(PDFLayout.text(flags.joined(separator: "   "), size: 9, bold: true)) }
             let keep = rows.count + 1
             // The source's description, bracketed: never to be read as the message's words.
-            if let note = e.note { rows += PDFLayout.rows(PDFLayout.text("[\(note)]", size: 10, italic: true, gray: true), indent: 14) }
+            if let note = e.note { rows += PDFLayout.rows(styled("[\(note)]", size: 10, italic: true, gray: true, entry: n, whole: hideText), indent: 14) }
             if let text = e.text {
-                rows += PDFLayout.rows(PDFLayout.text(text, size: 10.5), indent: 14)
+                rows += PDFLayout.rows(styled(text, size: 10.5, entry: n, whole: hideText), indent: 14)
             } else if let empty = e.unsent ? "[unsent; no text remains]" : (e.exhibits.isEmpty && e.note == nil ? "[no text]" : nil) {
                 rows += PDFLayout.rows(PDFLayout.text(empty, size: 10, italic: true, gray: true), indent: 14)
             }
             if e.edited, e.history.count > 1 {
                 rows += PDFLayout.rows(PDFLayout.text("Edit history (oldest first):", size: 8.5, bold: true), indent: 14)
                 for (v, event) in e.history.enumerated() {
-                    rows += PDFLayout.rows(PDFLayout.text("Version \(v + 1), \(Self.timestamp(event.date)): \(event.text)", size: 8.5), indent: 26)
+                    let lead = "Version \(v + 1), \(Self.timestamp(event.date)): "
+                    rows += PDFLayout.rows(styled(lead + event.text, size: 8.5, entry: n, from: hideText.map { ((lead as NSString).length, $0) }), indent: 26)
                 }
             }
-            for x in e.exhibits {
+            for (k, x) in e.exhibits.enumerated() {
                 exhibitNumber += 1
-                rows += PDFLayout.rows(PDFLayout.text(exhibitLine(x, number: exhibitNumber), size: 8.5), indent: 14)
+                let hide = redactor?.attachment(e.guid, index: k)
+                let lead = "\(exhibitLabel(exhibitNumber)): "
+                rows += PDFLayout.rows(styled(exhibitLine(x, number: exhibitNumber), size: 8.5, entry: n,
+                                              from: hide.map { ((lead as NSString).length, $0) }), indent: 14)
                 if options.embedImages, x.isImage, let shown = x.displayPath,
                    let image = images.row(archiveRoot.appendingPathComponent(shown)) {
                     var row = image
                     row.indent = 26
+                    row.redaction = hide
                     rows.append(row)
                 }
             }
             for a in e.annotations {
-                rows += PDFLayout.rows(PDFLayout.text("[\(a)]", size: 8.5, italic: true, gray: true), indent: 14)
+                rows += PDFLayout.rows(styled("[\(a)]", size: 8.5, italic: true, gray: true, entry: n), indent: 14)
             }
             blocks.append(PDFLayout.Block(rows: rows, keep: min(keep, rows.count), entry: n, pageBreakBefore: blocks.isEmpty))
         }
+        if let lines = redactionLog {
+            var rows = PDFLayout.rows(PDFLayout.text("REDACTION LOG", size: 9, bold: true))
+            for line in lines { rows += PDFLayout.rows(PDFLayout.text(line, size: 8.5), indent: 14) }
+            blocks.append(PDFLayout.Block(rows: rows, keep: min(2, rows.count), entry: nil))
+        }
         return blocks
+    }
+
+    // MARK: Redaction (Milestone 24)
+
+    /// What of `s` an exhibit redacts: all of it (`whole`: a message's text), all after an
+    /// offset (`from`: an attachment's line after its label, an edit's text after its time), or
+    /// the words and numbers redacted everywhere. Each is noted for the log.
+    func marks(_ s: String, entry: Int?, whole: Int? = nil, from: (offset: Int, id: Int)? = nil) -> [(range: NSRange, id: Int)] {
+        guard let redactor, !redactor.isEmpty else { return [] }
+        let length = (s as NSString).length
+        var out: [(range: NSRange, id: Int)]
+        if let whole {
+            out = length > 0 ? [(NSRange(location: 0, length: length), whole)] : []
+        } else {
+            out = redactor.ranges(in: s)
+            if let from, from.offset < length {
+                out = out.filter { $0.range.upperBound <= from.offset } + [(NSRange(location: from.offset, length: length - from.offset), from.id)]
+            }
+        }
+        for o in out { redactor.note(o.id, entry: entry) }
+        return out
+    }
+
+    func styled(_ s: String, size: CGFloat, bold: Bool = false, italic: Bool = false, gray: Bool = false, entry: Int?,
+                whole: Int? = nil, from: (offset: Int, id: Int)? = nil) -> NSAttributedString {
+        let base = PDFLayout.text(s, size: size, bold: bold, italic: italic, gray: gray)
+        let found = marks(s, entry: entry, whole: whole, from: from)
+        guard !found.isEmpty else { return base }
+        let out = NSMutableAttributedString(attributedString: base)
+        for f in found { out.addAttribute(PDFLayout.redactionKey, value: f.id, range: f.range) }
+        return out
+    }
+
+    /// `s` for HTML: what is redacted replaced by its label, or (the unredacted copy) marked.
+    func h(_ s: String, entry: Int?, whole: Int? = nil, from: (offset: Int, id: Int)? = nil) -> String {
+        let found = marks(s, entry: entry, whole: whole, from: from)
+        guard let redactor, !found.isEmpty else { return HTML.escape(s) }
+        let ns = s as NSString
+        var out = "", at = 0
+        for f in found {
+            out += HTML.escape(ns.substring(with: NSRange(location: at, length: f.range.location - at)))
+            let label = HTML.escape(redactor.label(f.id))
+            out += marked ? "<mark class=\"redaction\" title=\"\(label)\">\(HTML.escape(ns.substring(with: f.range)))</mark>"
+                : "<span class=\"redacted\">\(label)</span>"
+            at = f.range.upperBound
+        }
+        return out + HTML.escape(ns.substring(from: at))
+    }
+
+    /// The redaction log's lines; nil without redactions. The same in both copies, and never
+    /// the words themselves.
+    var redactionLog: [String]? {
+        guard let redactor, !redactor.isEmpty else { return nil }
+        var cover = Set<Int>()
+        for (_, value) in coverLines(bates: "") { for r in redactor.ranges(in: value) { cover.insert(r.id) } }
+        return redactor.log(coverHits: cover)
     }
 
     func exhibitLine(_ x: TranscriptEntry.Exhibit, number: Int) -> String {
@@ -300,7 +372,7 @@ struct TranscriptDocument {
 
             """
         for (label, value) in coverLines(bates: bates) {
-            out += "<tr><th>\(HTML.escape(label))</th><td>\(HTML.escape(value))</td></tr>\n"
+            out += "<tr><th>\(HTML.escape(label))</th><td>\(h(value, entry: nil))</td></tr>\n"
         }
         out += "</table>\n<p class=\"note\">\(HTML.escape(explanation))</p>\n"
         let numbers = self.numbers
@@ -312,8 +384,9 @@ struct TranscriptDocument {
             let e = entries[i]
             let n = i + 1
             var exhibitNumber = firstExhibit - 1
+            let hideText = redactor?.message(e.guid)
             out += "<article id=\"e\(n)\"><h2><span class=\"n\">#\(n)</span> <span class=\"time\">\(HTML.escape(Self.timestamp(e.date)))</span> "
-            out += e.isEvent ? "<span class=\"who\">Event</span>" : "<span class=\"who\">\(HTML.escape(sender(e)))</span> <span class=\"service\">\(HTML.escape(e.service))</span>"
+            out += e.isEvent ? "<span class=\"who\">Event</span>" : "<span class=\"who\">\(h(sender(e), entry: n))</span> <span class=\"service\">\(HTML.escape(e.service))</span>"
             out += "</h2>\n"
             if let page = exhibitPage(i) { out += "<p class=\"annotation page\">[Transcript page \(HTML.escape(page))]</p>\n" }
             var flags: [String] = []
@@ -327,26 +400,38 @@ struct TranscriptDocument {
                 } ?? "In reply to a message not in this transcript")
             }
             if !flagHTML.trimmingCharacters(in: .whitespaces).isEmpty { out += "<p class=\"flags\">\(flagHTML)</p>\n" }
-            if let note = e.note { out += "<p class=\"source_note\">[\(HTML.escape(note))]</p>\n" }
-            if let text = e.text { out += "<p class=\"text\">\(HTML.escape(text))</p>\n" }
+            if let note = e.note { out += "<p class=\"source_note\">[\(h(note, entry: n, whole: hideText))]</p>\n" }
+            if let text = e.text { out += "<p class=\"text\">\(h(text, entry: n, whole: hideText))</p>\n" }
             else if e.unsent { out += "<p class=\"source_note\">[unsent; no text remains]</p>\n" }
             if e.edited, e.history.count > 1 {
-                out += "<ol class=\"history\">" + e.history.map { "<li>\(HTML.escape(Self.timestamp($0.date))): \(HTML.escape($0.text))</li>" }.joined() + "</ol>\n"
+                out += "<ol class=\"history\">" + e.history.map { "<li>\(HTML.escape(Self.timestamp($0.date))): \(h($0.text, entry: n, whole: hideText))</li>" }.joined() + "</ol>\n"
             }
-            for x in e.exhibits {
+            for (k, x) in e.exhibits.enumerated() {
                 exhibitNumber += 1
-                let line = HTML.escape(exhibitLine(x, number: exhibitNumber))
-                if let path = x.archivePath {
+                let hide = redactor?.attachment(e.guid, index: k)
+                let plain = exhibitLine(x, number: exhibitNumber)
+                let lead = "\(exhibitLabel(exhibitNumber)): "
+                let line = h(plain, entry: n, from: hide.map { ((lead as NSString).length, $0) })
+                // A redacted copy links to no file whose line it redacts: the link would show it.
+                let hidden = !marked && line != HTML.escape(plain)
+                if let path = x.archivePath, !hidden {
                     out += "<p class=\"exhibit\"><a href=\"../\(HTML.path(path))\">\(line)</a></p>\n"
-                    if options.embedImages, x.isImage, let shown = x.displayPath {
-                        out += "<img class=\"exhibit\" src=\"../\(HTML.path(shown))\" loading=\"lazy\" alt=\"\(HTML.escape(exhibitLabel(exhibitNumber)))\">\n"
-                    }
                 } else {
-                    out += "<p class=\"exhibit missing\">\(line)</p>\n"
+                    out += "<p class=\"exhibit\(x.archivePath == nil ? " missing" : "")\">\(line)</p>\n"
+                }
+                if x.archivePath != nil, options.embedImages, x.isImage, let shown = x.displayPath {
+                    if let hide, !marked {
+                        out += "<div class=\"redacted image\">\(HTML.escape(redactor?.label(hide) ?? "REDACTED"))</div>\n"
+                    } else {
+                        out += "<img class=\"exhibit\(hide != nil ? " redaction" : "")\" src=\"../\(HTML.path(shown))\" loading=\"lazy\" alt=\"\(HTML.escape(exhibitLabel(exhibitNumber)))\">\n"
+                    }
                 }
             }
-            for a in e.annotations { out += "<p class=\"annotation\">[\(HTML.escape(a))]</p>\n" }
+            for a in e.annotations { out += "<p class=\"annotation\">[\(h(a, entry: n))]</p>\n" }
             out += "</article>\n"
+        }
+        if let lines = redactionLog {
+            out += "<section class=\"redaction-log\"><h2>Redaction log</h2>\n" + lines.map { "<p>\(HTML.escape($0))</p>\n" }.joined() + "</section>\n"
         }
         out += "<footer>MessageArchiver \(HTML.escape(facts.appVersion)) · Bates \(HTML.escape(bates)) in the PDF</footer>\n</body>\n</html>\n"
         return out
@@ -365,6 +450,9 @@ struct TranscriptDocument {
         ol.history, p.exhibit, p.annotation { font-size: 0.85em; margin: 0.2em 0 0.2em 1.1em; overflow-wrap: anywhere; }
         p.annotation { color: #555; font-style: italic; } p.missing { color: #8A6A2E; }
         p.source_note { color: #555; font-style: italic; margin: 0.2em 0 0.2em 1.1em; }
+        span.redacted, div.redacted { background: #000; color: #fff; font: 600 0.75em -apple-system, system-ui, sans-serif; padding: 0.1em 0.4em; } div.redacted.image { display: flex; align-items: center; justify-content: center; width: 18em; height: 10em; margin: 0.3em 0 0.3em 2em; }
+        mark.redaction { background: #ffccde; color: #111; } img.redaction { outline: 3px solid #e35c8f; }
+        section.redaction-log { margin-top: 1.5em; font-size: 0.85em; } section.redaction-log h2 { font-size: 1em; }
         p.gap { color: #555; font-style: italic; font-size: 0.85em; text-align: center; border-bottom: 1px solid #e3e3e3; padding: 0.6em 0; margin: 0; }
         img.exhibit { display: block; max-width: 60%; max-height: 22em; margin: 0.3em 0 0.3em 2em; }
         footer { margin: 2em 0; color: #555; font-size: 0.85em; text-align: center; }

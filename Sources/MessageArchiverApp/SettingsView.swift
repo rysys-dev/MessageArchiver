@@ -53,6 +53,8 @@ struct SettingsView: View {
                 Text("It’s a copy of your messages’ text that lets the dashboard search what’s said. It goes to the Trash, and is made again the next time you choose what to export.")
             }
             Divider()
+            AutomaticUpdatesSection()
+            Divider()
             SourcesSection().id("sources")
             Divider()
             Text("Converters").font(.headline)
@@ -146,6 +148,70 @@ struct SettingsView: View {
         case .denied: "Not allowed"
         case .restricted: "Restricted on this Mac"
         }
+    }
+}
+
+/// Settings ▸ Automatic Updates (Milestone 25): how often, which archives, and what each
+/// one's last scheduled update did.
+private struct AutomaticUpdatesSection: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Automatic updates").font(.headline)
+            Picker("Update", selection: Binding(get: { state.schedule.frequency }, set: { state.setScheduleFrequency($0) })) {
+                Text("Off").tag(ScheduledUpdates.Frequency.off)
+                Text("Daily").tag(ScheduledUpdates.Frequency.daily)
+                Text("Weekly").tag(ScheduledUpdates.Frequency.weekly)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if let note = state.scheduleAgentNote {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(note).font(.callout).foregroundStyle(palette.flag).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if state.scheduleNeedsApproval { Button("Open Login Items") { state.openLoginItems() } }
+                }
+            }
+            if !state.schedule.archives.isEmpty {
+                PanelCard {
+                    ForEach(state.schedule.archives, id: \.self) { path in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(URL(fileURLWithPath: path).lastPathComponent).lineLimit(1)
+                                Text(outcome(path)).font(.caption)
+                                    .foregroundStyle(state.schedule.outcomes[path]?.ok == false ? palette.flag : .secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Button { state.removeScheduledArchive(path) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless)
+                                .help("Stop updating this archive on a schedule")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            HStack {
+                Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Add Archive…") { state.addScheduledArchive() }
+            }
+        }
+    }
+
+    private var explanation: String {
+        switch state.schedule.frequency {
+        case .off: "Keeps archives up to date on their own, so messages Messages later deletes (keeping a year, say) are already archived."
+        case .daily, .weekly: "Around 12:30 or 20:30, or when the Mac next wakes, MessageArchiver opens hidden, updates these as Update an existing archive… does, and quits. It tells you only if something needs you. Archives made from an iPhone backup aren’t updated this way."
+        }
+    }
+
+    private func outcome(_ path: String) -> String {
+        guard let o = state.schedule.outcomes[path] else { return "Not updated on a schedule yet." }
+        let when = (try? Date(o.date, strategy: .iso8601)).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? o.date
+        return "\(when): \(o.summary)"
     }
 }
 

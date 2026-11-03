@@ -64,6 +64,15 @@ struct ExportSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 20)
+                Toggle("Read text in photos and voice notes", isOn: Binding(get: { state.exportOptions.recognizeText }, set: { on in
+                    state.exportOptions.recognizeText = on
+                    if on { Recognition.askForSpeech() }
+                }))
+                Text("So search finds a receipt’s total or what a voice note said. Read on this Mac, nothing sent anywhere; kept apart from what was sent, and never in transcripts. Makes the first export slower.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 20)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .toggleStyle(.checkbox)
 
@@ -174,6 +183,9 @@ struct ExportingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 ProgressRow(title: "Messages", done: p.messages, total: max(p.expectedMessages, p.messages))
                 ProgressRow(title: "Attachments", done: p.attachmentsDone, total: p.attachmentsQueued)
+                if p.toRecognize > 0 {
+                    ProgressRow(title: "Reading text in photos and voice notes", done: p.recognized, total: p.toRecognize)
+                }
                 if p.toHash > 0 {
                     ProgressRow(title: "Hashing files for the manifest", done: p.hashed, total: p.toHash)
                 }
@@ -335,6 +347,8 @@ struct DoneView: View {
     static func details(_ r: ExportResult) -> [String] {
         var out: [String] = []
         if r.manifestFiles > 0 { out.append("\(Plural.count(r.manifestFiles, "file")) hashed in manifest.json and SHA256SUMS.txt.") }
+        if r.recognized > 0 { out.append("Text read in \(r.recognized == 1 ? "1 photo or voice note" : "\(r.recognized.formatted()) photos and voice notes"): search finds it, and JSON/recognized.json lists it.") }
+        if let note = r.recognitionNote { out.append(note) }
         if !r.missing.isEmpty || !r.notCopied.isEmpty || !r.keptOriginal.isEmpty {
             out.append("Each attachment below, and each missing one, is listed in the archive’s attachment notes (linked from its index).")
         }

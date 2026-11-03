@@ -26,9 +26,14 @@ struct MessageArchiverApp: App {
                 .sheet(isPresented: Binding(get: { state.verifyTarget != nil }, set: { if !$0 { state.verifyTarget = nil } })) {
                     VerifySheet().modifier(AppSkin()).environment(state)
                 }
-                .sheet(item: Binding(get: { state.updatePlan }, set: { state.updatePlan = $0 })) { plan in
+                .sheet(isPresented: Binding(get: { state.textReadTarget != nil }, set: { if !$0 { state.textReadTarget = nil } })) {
+                    TextReadSheet().modifier(AppSkin()).environment(state)
+                }
+                .sheet(item: Binding(get: { state.scheduleRunning ? nil : state.updatePlan }, set: { state.updatePlan = $0 })) { plan in
                     UpdateSheet(plan: plan).modifier(AppSkin()).environment(state)
                 }
+                // Updates on a schedule (Milestone 25): at launch by the agent, and while open.
+                .task { await state.watchSchedule() }
         }
         .defaultSize(width: 960, height: 720)
         .windowResizability(.contentMinSize)
@@ -40,6 +45,8 @@ struct MessageArchiverApp: App {
                     .disabled(state.isExporting || state.fullDiskAccess != .granted)
                 Button("Verify Archive…") { state.chooseAndVerify() }
                     .disabled(state.isExporting)
+                Button("Read Text in Photos and Voice Notes…") { state.chooseAndReadText() }
+                    .disabled(state.isExporting || state.textReadTask != nil)
                 Divider()
                 Button("Install Plug-in…") { state.chooseAndInstallPlugin() }
                     .disabled(state.isExporting)
