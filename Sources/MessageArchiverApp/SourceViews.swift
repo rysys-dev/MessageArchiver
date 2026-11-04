@@ -28,8 +28,11 @@ struct SourceMenu: View {
                     }
                 }
             }
-            // Installed but with nothing to read yet: its instructions say how.
-            let waiting = state.plugins.filter { p in state.sources.contains { $0.id == p.manifest?.id && $0.status == .notOnThisMac } }
+            // Installed but with nothing to read yet, on this Mac or in the backup chosen: its
+            // instructions say how.
+            let waiting = state.plugins.filter { p in
+                state.sources.contains { $0.id == p.manifest?.id && $0.status == .notOnThisMac && state.backupFind($0.id) == nil }
+            }
             if !waiting.isEmpty {
                 Section("Not set up yet") {
                     ForEach(waiting, id: \.folder) { p in
@@ -62,7 +65,7 @@ struct SourceMenu: View {
         }
         .fixedSize()
         .help("Read this Mac’s Messages, or a backup of an iPhone made with Finder, and the other sources ticked")
-        .disabled(state.isReading || state.isUnlocking)
+        .disabled(state.isBusy || state.isUnlocking)
         .onAppear { state.listBackups() }
     }
 }

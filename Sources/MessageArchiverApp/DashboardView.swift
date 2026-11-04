@@ -21,13 +21,19 @@ struct DashboardView: View {
         .toolbar {
             ToolbarItem { SourceMenu() }
             ToolbarItem {
-                Button {
-                    Task { await state.readMessages() }
-                } label: {
-                    Label("Read Again", systemImage: "arrow.clockwise")
+                if state.isBusy {
+                    // In Read Again's place while anything is read: the app is working.
+                    ProgressView()
+                        .controlSize(.small)
+                        .help(state.readingStage)
+                } else {
+                    Button {
+                        Task { await state.readMessages() }
+                    } label: {
+                        Label("Read Again", systemImage: "arrow.clockwise")
+                    }
+                    .help(state.backup == nil ? "Read Messages again, to include anything new" : "Read the backup again")
                 }
-                .help(state.backup == nil ? "Read Messages again, to include anything new" : "Read the backup again")
-                .disabled(state.isReading)
             }
         }
     }
@@ -77,20 +83,40 @@ private struct ChoicePane: View {
                     .frame(maxWidth: 220)
             }
             if searchesWhatsSaid { IndexStatus() }
-            switch state.listMode {
-            case .conversations: ConversationTable()
-            case .people: PeopleTable()
+            Group {
+                switch state.listMode {
+                case .conversations: ConversationTable()
+                case .people: PeopleTable()
+                }
+            }
+            .overlay {
+                // A list emptied for a new source, while it is read: say so, not "0 of 0".
+                if state.isBusy && state.threads.isEmpty {
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text(state.readingStage).foregroundStyle(.secondary)
+                    }
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
             }
             HStack {
+                if state.isBusy && !state.threads.isEmpty {
+                    // Read Again: the list stays as it was until the new read replaces it.
+                    ProgressView().controlSize(.small)
+                    Text(state.readingStage).foregroundStyle(.secondary)
+                }
                 if state.listMode == .people {
                     Toggle("Leave out group chats", isOn: $state.excludeGroups)
                         .toggleStyle(.checkbox)
                         .help("Ticking a person ticks only your one-to-one conversations with them")
                 }
                 Spacer()
-                Text("\(state.exportConversations.count.formatted()) of \(state.shownConversations.count.formatted()) conversations")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                if !(state.isBusy && state.threads.isEmpty) {
+                    Text("\(state.exportConversations.count.formatted()) of \(state.shownConversations.count.formatted()) conversations")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
         }
         .padding(16)
@@ -518,10 +544,17 @@ private struct Section<Content: View>: View {
 }
 
 private struct ActivityChart: View {
+    @Environment(AppState.self) private var state
     let months: [(month: String, messages: Int)]
 
     var body: some View {
-        if months.isEmpty {
+        if months.isEmpty && state.isBusy {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Reading…").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if months.isEmpty {
             Text("Nothing in this selection")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

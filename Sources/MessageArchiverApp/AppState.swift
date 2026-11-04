@@ -29,6 +29,11 @@ final class AppState {
     // MARK: What was read
 
     private(set) var isReading = false
+    /// A source being switched to: everything from the old one is gone, and the new one's
+    /// plug-ins are looked for before it is read.
+    private(set) var isSwitchingSource = false
+    /// Something is being read, so an empty list or chart means "not yet", not "nothing".
+    var isBusy: Bool { isReading || isSwitchingSource }
     /// Counts source switches, so a read that began before one is recognised and dropped.
     private var sourceChanges = 0
     private(set) var isReadingSummary = false
@@ -1295,6 +1300,11 @@ final class AppState {
         }
     }
 
+    /// What a plug-in found in the iPhone backup being read; nil when none is chosen or it found
+    /// nothing there. A plug-in that reads only backups finds nothing on the Mac
+    /// itself, and is set up all the same.
+    func backupFind(_ id: SourceID) -> ProbeResult? { backup == nil ? nil : backupFinds[id] }
+
     /// The other sources read beside Messages: those of `alsoRead` not left out.
     var otherSourcesTaken: [(RegisteredSource, ProbeResult)] { alsoRead.filter { !leftOut.contains($0.0.id) } }
 
@@ -1399,6 +1409,9 @@ final class AppState {
         // meanwhile would pair the new source's engine with the old one's conversation numbers
         // and names (audit 2026-11-01, H11). A read of the old source still running is dropped.
         sourceChanges += 1
+        isSwitchingSource = true
+        defer { isSwitchingSource = false }
+        readingStage = chosen == nil ? "Reading this Mac’s Messages…" : "Looking in the backup for other apps’ messages…"
         source = url
         backup = chosen
         engine = Engine.bundled()?.unlocked(with: key)
@@ -1423,6 +1436,16 @@ final class AppState {
             await readSummary()
         }
     }
+
+    #if DEBUG
+    /// Debug captures: a read under way, and an export part-done.
+    func debugShowBusy(_ stage: String?) {
+        isSwitchingSource = stage != nil
+        readingStage = stage ?? ""
+    }
+
+    func debugShowProgress(_ p: ExportProgress) { exportProgress = p }
+    #endif
 
     func inform(_ title: String, _ detail: String) {
         if quiet {

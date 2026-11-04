@@ -300,8 +300,11 @@ private struct SourcesSection: View {
     private func status(_ plugin: InstalledPlugin) -> String {
         if let problem = plugin.problem { return problem }
         guard let source = registered(plugin) else { return "Checking…" }
+        // What it reads on this Mac, and in the iPhone backup chosen (all a backup-only plug-in reads).
+        let reads = source.found.filter(\.isReady).map(\.label) + [state.backupFind(source.id)?.label].compactMap { $0 }
         switch source.status {
-        case .ready: return "Reads " + source.found.filter(\.isReady).map(\.label).joined(separator: ", ")
+        case .ready: return "Reads " + reads.joined(separator: ", ")
+        case .notOnThisMac where !reads.isEmpty: return "Reads " + reads.joined(separator: ", ")
         // An export chosen that can no longer be read says why.
         case .notOnThisMac where source.description?.kinds.contains("export") == true:
             if let why = source.found.first(where: { !$0.isReady }) { return "Can’t read the export chosen: \(why.detail ?? why.label)" }

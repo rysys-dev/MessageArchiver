@@ -71,11 +71,14 @@ struct CardHeading: View {
     let symbol: String
     let title: String
     let detail: String
+    /// Pulses while the app works, so a long step never looks stuck.
+    var working = false
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 44, weight: .light))
             .foregroundStyle(.tint)
+            .symbolEffect(.pulse, isActive: working)
             .accessibilityHidden(true)
         VStack(spacing: 6) {
             Text(title)
@@ -96,8 +99,8 @@ struct StartView: View {
         StartLayout {
             CardHeading(symbol: state.backup == nil ? "bubble.left.and.text.bubble.right" : "iphone",
                         title: state.backup.map { "Messages from “\($0.deviceName)”" } ?? "Your Messages on this Mac",
-                        detail: state.legalTools ? "Export conversations and their attachments as web pages, a legal transcript, Markdown and JSON."
-                            : "Export conversations and their attachments as web pages, Markdown and JSON.")
+                        detail: state.legalTools ? "Export conversations and their attachments\nas web pages, a legal transcript, Markdown and JSON."
+                            : "Export conversations and their attachments\nas web pages, Markdown and JSON.")
             SourceMenu()
             if state.fullDiskAccess == .noDatabase && state.backup == nil {
                 Text("There’s no Messages history on this Mac yet.")

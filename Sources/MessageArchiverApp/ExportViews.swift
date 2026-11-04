@@ -179,19 +179,31 @@ struct ExportingView: View {
     @Environment(AppState.self) private var state
     @Environment(\.palette) private var palette
 
+    /// What is being done now, under the title.
+    static func step(_ p: ExportProgress, recognizing: Bool, hashing: Bool) -> String {
+        if !p.finishing { return "Writing the conversation pages and copying attachments." }
+        if recognizing { return "Reading text in photos and voice notes, on this Mac. A long voice note takes a while." }
+        if hashing { return "Hashing every file for the manifest." }
+        return "Writing the archive’s index and the Message Explorer."
+    }
+
     var body: some View {
         let p = state.exportProgress
+        let messagesDone = p.finishing || p.messages >= max(p.expectedMessages, 1)
+        let attachmentsDone = p.finishing && p.attachmentsDone >= p.attachmentsQueued
+        let recognizing = p.toRecognize > 0 && p.recognized < p.toRecognize
+        let hashing = p.toHash > 0 && p.hashed < p.toHash
         StartLayout {
             CardHeading(symbol: "archivebox", title: p.finishing ? "Finishing…" : "Exporting…",
-                        detail: "Writing the conversation pages and copying attachments.")
+                        detail: Self.step(p, recognizing: recognizing, hashing: hashing), working: true)
             VStack(alignment: .leading, spacing: 10) {
-                ProgressRow(title: "Messages", done: p.messages, total: max(p.expectedMessages, p.messages))
-                ProgressRow(title: "Attachments", done: p.attachmentsDone, total: p.attachmentsQueued)
+                ProgressRow(title: "Messages", done: p.messages, total: max(p.expectedMessages, p.messages), active: !messagesDone)
+                ProgressRow(title: "Attachments", done: p.attachmentsDone, total: p.attachmentsQueued, active: !attachmentsDone)
                 if p.toRecognize > 0 {
-                    ProgressRow(title: "Reading text in photos and voice notes", done: p.recognized, total: p.toRecognize)
+                    ProgressRow(title: "Reading text in photos and voice notes", done: p.recognized, total: p.toRecognize, active: recognizing)
                 }
                 if p.toHash > 0 {
-                    ProgressRow(title: "Hashing files for the manifest", done: p.hashed, total: p.toHash)
+                    ProgressRow(title: "Hashing files for the manifest", done: p.hashed, total: p.toHash, active: hashing)
                 }
             }
             .frame(maxWidth: 440)
@@ -210,12 +222,16 @@ private struct ProgressRow: View {
     let title: String
     let done: Int
     let total: Int
+    /// Still under way: a spinner beside it, as a slow step (a long voice note) may not move
+    /// the bar for a while.
+    var active = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
+                if active { ProgressView().controlSize(.small) }
                 Text("\(done.formatted()) of \(total.formatted())")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
