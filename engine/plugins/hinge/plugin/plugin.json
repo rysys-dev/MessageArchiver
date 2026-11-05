@@ -1,0 +1,9 @@
+{
+  "id": "hinge",
+  "name": "Hinge",
+  "version": "0.0.1",
+  "protocol": 2,
+  "minimum_app": "1.4.2",
+  "executable": "ma-hinge",
+  "cargo_package": "ma-hinge"
+}

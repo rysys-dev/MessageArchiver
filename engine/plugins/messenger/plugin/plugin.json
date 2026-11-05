@@ -1,0 +1,9 @@
+{
+  "id": "messenger",
+  "name": "Messenger",
+  "version": "0.0.1",
+  "protocol": 2,
+  "minimum_app": "1.4.2",
+  "executable": "ma-messenger",
+  "cargo_package": "ma-messenger"
+}

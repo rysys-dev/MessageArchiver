@@ -26,7 +26,7 @@ tempfile = "3"
 # The protocol crate every engine shares, and the test engines in engine/fixtures (Milestones
 # 15, 16). `cargo build` here builds ma-engine alone; the app ships only that.
 [workspace]
-members = ["protocol", "backup", "plugins/whatsapp", "plugins/signal", "plugins/telegram"]
+members = ["protocol", "backup", "plugins/whatsapp", "plugins/signal", "plugins/telegram", "plugins/meta", "plugins/instagram", "plugins/messenger", "plugins/googlevoice", "plugins/dating", "plugins/tinder", "plugins/hinge"]
 
 [profile.release]
 lto = true

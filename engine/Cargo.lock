@@ -500,6 +500,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ma-dating"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "ma-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ma-engine"
 version = "0.1.0"
 dependencies = [
@@ -513,6 +523,56 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "ma-googlevoice"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "ma-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ma-hinge"
+version = "0.0.1"
+dependencies = [
+ "ma-dating",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ma-instagram"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "ma-meta",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ma-messenger"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "ma-meta",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ma-meta"
+version = "1.0.0"
+dependencies = [
+ "chrono",
+ "ma-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -543,6 +603,15 @@ dependencies = [
  "chrono",
  "ma-protocol",
  "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ma-tinder"
+version = "0.0.1"
+dependencies = [
+ "ma-dating",
  "serde_json",
  "tempfile",
 ]

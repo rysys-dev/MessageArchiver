@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Instagram plug-in for MessageArchiver</title>
+<style>body{font:15px -apple-system,sans-serif;max-width:38em;margin:2em auto;padding:0 1em;line-height:1.5}h2{font-size:1.05em;margin-top:1.6em}.rc{border:1px dashed #b58a2a;padding:.6em .9em;border-radius:6px}</style></head>
+<body>
+<h1>Instagram</h1>
+<p class="rc"><b>A release candidate.</b> This plug-in was built from what is known of Instagram’s
+download, without a real one to check it against. If something is missing or looks wrong,
+please tell us at rysys.net.</p>
+<p>This plug-in lets MessageArchiver read your Instagram direct messages, beside Messages.</p>
+
+<h2>Bring your Instagram messages in</h2>
+<p>Instagram keeps your messages on its servers, so you ask Meta for a copy, a download of your
+information. Meta takes from a few minutes to a few days to prepare it, and emails you when it
+is ready.</p>
+<ol>
+<li>Open <b>Accounts Center</b> (in Instagram: your profile ▸ the menu ▸ <b>Accounts Center</b>, or
+<code>accountscenter.instagram.com</code> in a browser) ▸ <b>Your information and permissions</b> ▸
+<b>Download your information</b>.</li>
+<li>Choose <b>Download or transfer information</b>, your Instagram account, then <b>Some of your
+information</b>, and tick <b>Messages</b>.</li>
+<li>Choose <b>Download to device</b>. Set <b>Date range</b> to <b>All time</b>, <b>Format</b> to
+<b>JSON</b> (HTML can’t be read), and <b>Media quality</b> to <b>High</b>. Press <b>Create files</b>.</li>
+<li>When Meta’s email arrives, download the file (or every part, for a large one) into
+<b>Downloads</b>, and open each to unzip it.</li>
+<li>In MessageArchiver, choose <b>Instagram: Choose an Export…</b> from the source menu (or
+<b>Choose…</b> in Settings ▸ Sources), and choose <b>Downloads</b>: every part is read
+together. You can choose the unzipped folder instead.</li>
+</ol>
+
+<h2>Later downloads</h2>
+<p>Download again the same way, unzip it beside the earlier one, and update your archive. Only
+what is new is added.</p>
+
+<h2>What is read</h2>
+<p>Every conversation in the download, including message requests, with photos, videos, voice
+messages, reactions and the posts and links shared. Meta’s download names people only by the
+name they show on Instagram, with no phone number or email, so they aren’t matched to your
+Contacts on their own: you can join someone to the right person by hand in People. Meta keeps no
+replies or edits in the download. A file Meta left out is listed as missing.</p>
+
+<h2>Keep the download safe</h2>
+<p>The download holds your messages unencrypted, and the details of your account. Once your
+archive is made, you may want to move it somewhere safe, or delete it.</p>
+
+<h2>What it can’t do</h2>
+<p>It reads only: nothing in Instagram or the download is changed, and it has no network access at all.</p>
+</body></html>

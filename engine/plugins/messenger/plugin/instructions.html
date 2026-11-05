@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Messenger plug-in for MessageArchiver</title>
+<style>body{font:15px -apple-system,sans-serif;max-width:38em;margin:2em auto;padding:0 1em;line-height:1.5}h2{font-size:1.05em;margin-top:1.6em}.rc{border:1px dashed #b58a2a;padding:.6em .9em;border-radius:6px}</style></head>
+<body>
+<h1>Messenger</h1>
+<p class="rc"><b>A release candidate.</b> This plug-in was built from what is known of Meta’s
+downloads, without a real one to check it against. If something is missing or looks wrong,
+please tell us at rysys.net.</p>
+<p>This plug-in lets MessageArchiver read your Facebook Messenger chats, beside Messages.</p>
+
+<h2>Bring your Messenger chats in</h2>
+<p>Messenger keeps your chats on Meta’s servers, in two places, so you download two things.
+Most chats since 2024 are end-to-end encrypted and are only in the second; the first has the
+history from before.</p>
+<p><b>1. Your Facebook information.</b> Meta takes from a few minutes to a few days to prepare
+it, and emails you when it is ready.</p>
+<ol>
+<li>Open <b>Accounts Center</b> (<code>accountscenter.facebook.com</code>) ▸ <b>Your information and
+permissions</b> ▸ <b>Download your information</b>.</li>
+<li>Choose <b>Download or transfer information</b>, your Facebook account, then <b>Some of your
+information</b>, and tick <b>Messages</b>.</li>
+<li>Choose <b>Download to device</b>. Set <b>Date range</b> to <b>All time</b>, <b>Format</b> to
+<b>JSON</b> (HTML can’t be read), and <b>Media quality</b> to <b>High</b>. Press <b>Create files</b>.</li>
+<li>When Meta’s email arrives, download the file (or every part) into <b>Downloads</b>, and open
+each to unzip it.</li>
+</ol>
+<p><b>2. Your encrypted chats.</b> On a computer, at <code>facebook.com</code> or
+<code>messenger.com</code>: Messenger’s <b>Settings</b> ▸ <b>Privacy &amp; safety</b> ▸
+<b>End-to-end encrypted chats</b> ▸ <b>Message storage</b> (or <b>Chat history</b>) ▸
+<b>Download secure storage data</b> (or <b>Download chat backup</b>). Message storage must be
+turned on. Save the file in <b>Downloads</b> and open it to unzip it.</p>
+<p>Then, in MessageArchiver, choose <b>Messenger: Choose an Export…</b> from the source menu
+(or <b>Choose…</b> in Settings ▸ Sources), and choose <b>Downloads</b>: both downloads are read
+together, and a chat in both is one conversation, each message once.</p>
+
+<h2>Later downloads</h2>
+<p>Download again the same way, unzip beside the earlier ones, and update your archive. Only
+what is new is added.</p>
+
+<h2>What is read</h2>
+<p>Every chat (the inbox, archived chats, message requests), with photos, videos, voice
+messages, files, reactions, shared links and calls. Meta’s downloads name people only by the
+name they show on Facebook, with no phone number or email, so they aren’t matched to your
+Contacts on their own: you can join someone to the right person by hand in People. A group
+chat that moved to encryption may show as two conversations, one from each download. Meta
+keeps no replies or edits in the downloads. A file Meta left out is listed as missing.</p>
+
+<h2>Keep the downloads safe</h2>
+<p>The downloads hold your messages unencrypted, and the details of your account. Once your
+archive is made, you may want to move them somewhere safe, or delete them.</p>
+
+<h2>What it can’t do</h2>
+<p>It reads only: nothing in Messenger or the downloads is changed, and it has no network access at all.</p>
+</body></html>

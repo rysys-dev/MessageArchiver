@@ -57,7 +57,8 @@ if strings -a "${STAGE}/${EXE}" | grep -qiE "${HOME}|/Users/$(id -un)"; then
 fi
 
 mkdir -p dist/plugins
-OUT="${REPO}/dist/plugins/${NAME}-${VERSION}.maplugin"
+# No spaces in the file name ("Google Voice"): it becomes a download link.
+OUT="${REPO}/dist/plugins/${NAME// /}-${VERSION}.maplugin"
 [ -e "$OUT" ] && /usr/bin/trash "$OUT"
 ditto -c -k --keepParent "$STAGE" "$OUT"
 echo "plug-in: ${OUT}"

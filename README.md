@@ -20,7 +20,10 @@ It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)
 Other apps' messages come from **plug-ins**, downloaded separately and installed from the app
 (File ▸ Install Plug-in…): each must be signed by RYSYS and runs with no network access. The
 first are **WhatsApp**, from WhatsApp for Mac or an iPhone backup, **Signal**, from the chat
-history Signal Desktop exports, and **Telegram**, from Telegram's data export. Someone you reach in two apps is one conversation. How plug-ins work: [`docs/plugins.md`](docs/plugins.md).
+history Signal Desktop exports, and **Telegram**, from Telegram's data export. **Release
+candidates**, not yet tested on real downloads: **Instagram**, **Messenger**, **Google Voice**,
+**Tinder** and **Hinge**, each from the copy of your data the service gives on request. Someone
+you reach in two apps is one conversation. How plug-ins work: [`docs/plugins.md`](docs/plugins.md).
 
 ## Install (for friends)
 

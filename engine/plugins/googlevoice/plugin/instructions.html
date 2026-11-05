@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Google Voice plug-in for MessageArchiver</title>
+<style>body{font:15px -apple-system,sans-serif;max-width:38em;margin:2em auto;padding:0 1em;line-height:1.5}h2{font-size:1.05em;margin-top:1.6em}.rc{border:1px dashed #b58a2a;padding:.6em .9em;border-radius:6px}</style></head>
+<body>
+<h1>Google Voice</h1>
+<p class="rc"><b>A release candidate.</b> This plug-in was built from what is known of Google Voice’s
+download, without a real one to check it against. If something is missing or looks wrong,
+please tell us at rysys.net.</p>
+<p>This plug-in lets MessageArchiver read your Google Voice texts, calls and voicemails, beside
+Messages. Google Voice names people by their phone numbers, so a person you text on both is one
+conversation, each message marked with how it was sent.</p>
+
+<h2>Bring your Google Voice messages in</h2>
+<p>Google keeps your Voice history on its servers, so you ask Google for a copy with Google
+Takeout. It takes from a few minutes to a few hours, and Google emails you when it is ready.</p>
+<ol>
+<li>Go to <code>takeout.google.com</code>, signed in to the Google account your Voice number is
+on.</li>
+<li>Press <b>Deselect all</b>, then tick <b>Voice</b> alone.</li>
+<li>Press <b>Next step</b>. Choose <b>Send download link via email</b>, <b>Export once</b>,
+<b>.zip</b>, and press <b>Create export</b>.</li>
+<li>When Google’s email arrives, download the file (or every part, for a large one) into
+<b>Downloads</b>, and open each to unzip it. A folder <code>takeout-</code> and the date
+appears.</li>
+<li>In MessageArchiver, choose <b>Google Voice: Choose an Export…</b> from the source menu (or
+<b>Choose…</b> in Settings ▸ Sources), and choose <b>Downloads</b>: every Takeout download in
+it is read together. You can choose the unzipped folder instead.</li>
+</ol>
+
+<h2>Later downloads</h2>
+<p>Export again the same way, unzip it beside the earlier one, and update your archive. Only
+what is new is added.</p>
+
+<h2>What is read</h2>
+<p>Texts and group texts, with the pictures, videos and contact cards sent in them; calls
+(incoming, outgoing and missed) as events in the conversation with that person; voicemails
+and recorded calls with their recordings, and Google’s transcript as a note beside them (it is
+Google’s hearing of the message, not its exact words). The Spam folder is left out. Google
+keeps no reactions, replies or edits in the download. A file Google left out is listed as
+missing.</p>
+
+<h2>Keep the download safe</h2>
+<p>The download holds your messages and voicemails unencrypted. Once your archive is made, you
+may want to move it somewhere safe, or delete it.</p>
+
+<h2>What it can’t do</h2>
+<p>It reads only: nothing in Google Voice or the download is changed, and it has no network access at all.</p>
+</body></html>

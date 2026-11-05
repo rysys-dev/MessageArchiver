@@ -1,0 +1,9 @@
+{
+  "id": "instagram",
+  "name": "Instagram",
+  "version": "0.0.1",
+  "protocol": 2,
+  "minimum_app": "1.4.2",
+  "executable": "ma-instagram",
+  "cargo_package": "ma-instagram"
+}
