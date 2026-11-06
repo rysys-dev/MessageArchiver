@@ -10,11 +10,15 @@ struct SourceMenu: View {
     var body: some View {
         Menu {
             Toggle("This Mac’s Messages", isOn: Binding(get: { state.backup == nil }, set: { _ in state.useMac() }))
-            Section(state.backups.isEmpty ? "No iPhone backups on this Mac" : "iPhone backups") {
+            Section(state.backups.isEmpty && state.backupsWithoutMessages.isEmpty ? "No iPhone backups on this Mac" : "iPhone backups") {
                 ForEach(state.backups) { b in
                     Toggle(isOn: Binding(get: { state.backup == b }, set: { _ in state.use(b) })) {
                         Label(b.label, systemImage: b.isEncrypted ? "lock.fill" : "iphone")
                     }
+                }
+                // Listed so a backup isn't simply missing (Milestone 30); it can't be chosen.
+                ForEach(state.backupsWithoutMessages) { b in
+                    Text("\(b.label): no messages in it")
                 }
             }
             // Read beside Messages (Milestone 16), one person's conversations combined; ticked

@@ -14,7 +14,7 @@ struct FullDiskAccessView: View {
         StartLayout {
             CardHeading(symbol: "lock.shield",
                         title: "MessageArchiver needs Full Disk Access",
-                        detail: "macOS keeps your Messages history private. To export it, MessageArchiver needs permission to read it. It only reads, and nothing leaves this Mac.")
+                        detail: "macOS keeps your Messages history and your iPhone’s backups private. To export your messages, MessageArchiver needs permission to read them. It only reads, and nothing leaves this Mac.")
             VStack(alignment: .leading, spacing: 14) {
                 Step(number: 1, text: "Open Full Disk Access in System Settings.") {
                     Button("Open System Settings") { state.openFullDiskAccessSettings() }
@@ -42,7 +42,7 @@ struct FullDiskAccessView: View {
     }
 }
 
-private struct Step<Action: View>: View {
+struct Step<Action: View>: View {
     let number: Int
     let text: String
     @ViewBuilder var action: Action

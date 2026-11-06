@@ -202,7 +202,7 @@ final class AppState {
     /// Looks again (at launch, on Check Again, and whenever the app comes to the front, since
     /// the user may have just changed it in System Settings) and moves on when it can.
     func checkPermissions() {
-        fullDiskAccess = FullDiskAccess.status(of: permissionTarget)
+        fullDiskAccess = currentAccess()
         contacts = ContactsAccess.status
         route()
     }
@@ -1106,6 +1106,64 @@ final class AppState {
     /// Full Disk Access is checked on the Messages database or backup being read.
     private var permissionTarget: URL { source }
 
+    /// Full Disk Access, as far as it can be known (Milestone 30): with no Messages on this Mac
+    /// there is no `chat.db` to try, so the backups folder says whether it is missing. Without
+    /// it, backups Finder made couldn't even be listed.
+    private func currentAccess() -> FullDiskAccess.Status {
+        let status = FullDiskAccess.status(of: permissionTarget)
+        if status == .noDatabase, backup == nil, IOSBackup.access() == .denied { return .denied }
+        return status
+    }
+
+    // MARK: Newcomers whose messages are on the iPhone (Milestone 30)
+
+    /// This Mac's Messages is chosen and has nothing in it: the start screen leads with the
+    /// iPhone's backup instead.
+    var macIsEmpty: Bool {
+        backup == nil && (fullDiskAccess == .noDatabase || diagnostics?.messages.total == 0)
+    }
+
+    /// The backups found but without Messages in them, to say so rather than leave them out.
+    private(set) var backupsWithoutMessages: [IOSBackup] = []
+
+    /// When this Mac's Messages is read and an unencrypted backup reaches further back: that
+    /// backup, its first day and the Mac's. Read once per backup.
+    private(set) var olderInBackup: (backup: IOSBackup, backupFrom: Date, macFrom: Date)?
+    private var comparedBackups: [String: Date?] = [:]
+
+    func compareWithBackup() async {
+        guard backup == nil, let mac = diagnostics, let macFrom = Self.day(mac.messages.firstDate),
+              let newest = backups.first(where: { !$0.isEncrypted }), let base = Engine.bundled() else { return }
+        if comparedBackups[newest.id] == nil {
+            let d = try? await base.diagnostics(source: newest.url)
+            comparedBackups[newest.id] = .some(Self.day(d?.messages.firstDate))
+        }
+        // A month's difference or more: less is the same history.
+        if let from = comparedBackups[newest.id] ?? nil, macFrom.timeIntervalSince(from) > 31 * 86400, backup == nil {
+            olderInBackup = (newest, from, macFrom)
+        } else {
+            olderInBackup = nil
+        }
+    }
+
+    private static func day(_ iso: String?) -> Date? { iso.flatMap { try? Date($0, strategy: .iso8601) } }
+
+    /// WhatsApp is read from WhatsApp for Mac, which holds only what came after it was linked.
+    var whatsAppFromMac: Bool {
+        backup == nil && otherSourcesTaken.contains { $0.0.id.rawValue == "whatsapp" }
+    }
+
+    /// Back from Finder: the backups again, and Full Disk Access, which they may now need.
+    func lookAgain() {
+        listBackups()
+        checkPermissions()
+        if fullDiskAccess != .denied { Task { await readSummary() } }
+    }
+
+    func openFinder() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"))
+    }
+
     // MARK: Other sources (Milestone 15)
 
     /// The engines beside Messages' own, introduced and probed, each on its own.
@@ -1352,7 +1410,9 @@ final class AppState {
     }
 
     func listBackups() {
-        backups = IOSBackup.list()
+        let all = IOSBackup.listAll()
+        backups = all.filter(\.hasMessages)
+        backupsWithoutMessages = all.filter { !$0.hasMessages }
     }
 
     func useMac() {
@@ -1427,7 +1487,7 @@ final class AppState {
         contentMatches = [:]
         updateShown()
         await refreshBackupFinds()
-        fullDiskAccess = FullDiskAccess.status(of: permissionTarget)
+        fullDiskAccess = currentAccess()
         if phase == .dashboard {
             await readMessages()
             if self.threads.isEmpty { phase = .start }

@@ -56,11 +56,12 @@ th { color: var(--muted); font-weight: 600; }
   <p>Export your Messages conversations, with their photos, videos and voice notes, to a folder on your Mac.</p>
 </header>
 
-<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> covers every screen and setting with screenshots, and has a chapter on legal transcripts. It describes version 1.3.0; what came after is described below: <a href="#exhibits">exhibits of chosen messages</a> (1.3.1), in 1.3.2 their <a href="#redaction">redaction</a>, <a href="#automatic-updates">automatic updates</a> and <a href="#text-in-photos">text in photos and voice notes</a>, and in 1.4.0 the <a href="#legal-tools">Legal tools</a> switch, the <a href="#explorer">Message Explorer</a> as each archive's front page, and <a href="#update">rebuilding archives from earlier versions</a>, and in 1.4.1 <a href="#plugins">plug-ins your browser opened into a folder</a>.</p>
+<p class="note">This is the short guide. The <a href="https://apps.rysys.net/downloads/MessageArchiver-1.3.0-manual.pdf">full manual (PDF, 47 pages, 8.8 MB)</a> has screenshots of every screen and setting, and a chapter on legal transcripts.</p>
 
 <nav aria-label="Contents">
   <ol>
     <li><a href="#install">Install</a></li>
+    <li><a href="#source">Your Mac or your iPhone?</a></li>
     <li><a href="#first-launch">First launch</a></li>
     <li><a href="#choose">Choose what to export</a></li>
     <li><a href="#people">People and names</a></li>
@@ -91,6 +92,36 @@ th { color: var(--muted); font-weight: 600; }
 </ol>
 <p>To install a newer version, quit MessageArchiver, replace the app in Applications, and open it. Your settings and permissions stay.</p>
 
+<h2 id="source">Your Mac or your iPhone?</h2>
+<p>MessageArchiver reads your messages from one of two places. Choose before you start:</p>
+<ul>
+  <li><strong>This Mac's Messages app</strong>, if you use Messages on this Mac and it has your history. Open Messages: if your conversations are there, as far back as you want, use this. It's the simplest, and it's the only way the archive keeps itself up to date (<a href="#mac-messages">how to set it up</a>).</li>
+  <li><strong>A backup of your iPhone</strong>, made on this Mac with Finder. Use this if you don't use Messages on this Mac, if your iPhone has older messages than the Mac, or for your whole WhatsApp history: WhatsApp for Mac holds only what arrived after it was linked, and your phone has everything.</li>
+</ul>
+<p>A backup is a copy of your iPhone, saved on this Mac. Making one changes nothing on your phone, and MessageArchiver only reads it.</p>
+<h3 id="mac-messages">Set up Messages on this Mac</h3>
+<p>Do this once, and your archive can keep itself up to date with <a href="#automatic-updates">automatic updates</a>. It brings your whole history to this Mac through iCloud.</p>
+<ol>
+  <li>On your iPhone, open <span class="menu">Settings › your name › iCloud</span>. Under <strong>Saved to iCloud</strong>, tap <strong>See All</strong>, then <strong>Messages</strong>, and turn it on.</li>
+  <li>On this Mac, open <strong>Messages</strong> and sign in with the same Apple Account as your iPhone.</li>
+  <li>In Messages, choose <span class="menu">Messages › Settings…</span>, click <strong>iMessage</strong>, and tick <strong>Enable Messages in iCloud</strong>.</li>
+  <li>In the same Settings, click <strong>General</strong> and set <strong>Keep messages</strong> to <strong>Forever</strong>, so nothing is deleted after 30 days or a year.</li>
+  <li>For texts from Android phones (green bubbles): on your iPhone, open <span class="menu">Settings › Apps › Messages › Text Message Forwarding</span> and turn on this Mac.</li>
+  <li>Leave the Mac on with Messages open. The first download of your history can take several hours. When a conversation in Messages scrolls back as far as on your iPhone, it's done.</li>
+</ol>
+<p>Messages in iCloud uses your iCloud storage. A long history with many photos can need more than the free 5 GB; your iPhone says so if it does.</p>
+<p>Then open MessageArchiver: the start screen shows your messages from this Mac.</p>
+
+<h3 id="make-backup">Make a backup of your iPhone</h3>
+<ol>
+  <li>Connect your iPhone to this Mac with a cable. If the iPhone asks whether to trust this computer, tap <strong>Trust</strong> and enter its passcode.</li>
+  <li>Open a Finder window and click your iPhone in the sidebar, under <strong>Locations</strong>.</li>
+  <li>In <strong>General</strong>, choose <strong>Back up all of the data on your iPhone to this Mac</strong>.</li>
+  <li>Click <strong>Back Up Now</strong> and leave the iPhone connected until it finishes. The first backup can take an hour or more.</li>
+</ol>
+<p><strong>Encrypt local backup</strong> is optional. If you turn it on, choose a password you'll remember: MessageArchiver asks for it each time it reads the backup, and without it nobody can read the backup.</p>
+<p>Then open MessageArchiver and choose the backup on the start screen (see <a href="#iphone">iPhone backups</a>). For WhatsApp, also install the <a href="#plugins">WhatsApp plug-in</a>: it reads WhatsApp from the same backup.</p>
+
 <h2 id="first-launch">First launch</h2>
 <h3>Full Disk Access</h3>
 <p>macOS keeps your Messages history private, so MessageArchiver asks for <strong>Full Disk Access</strong> before it can read it. The first screen has a button that opens the right place in System Settings: turn on MessageArchiver there. When macOS offers <strong>Quit &amp; Reopen</strong>, click it.</p>
@@ -98,6 +129,7 @@ th { color: var(--muted); font-weight: 600; }
 <p>With Contacts allowed, conversations show people's names instead of phone numbers and email addresses. You can skip this and turn it on later in Settings.</p>
 <h3>The start screen</h3>
 <p>The start screen shows what's in Messages: how many messages and conversations, the dates they span, and the attachments. Click <strong>Choose What to Export</strong>.</p>
+<p>If it shows few messages or none, your messages are on your iPhone: <a href="#make-backup">make a backup</a>, then choose it from the menu under the heading.</p>
 
 <h2 id="choose">Choose what to export</h2>
 <p>The dashboard lists every conversation, newest first. Everything is ticked to begin with.</p>
@@ -200,9 +232,9 @@ th { color: var(--muted); font-weight: 600; }
 <p>For an archive you already have, choose <span class="menu">File › Read Text in Photos and Voice Notes…</span>: it reads the photos and voice notes already in the archive (Messages and the phone aren't needed), and from then on that archive's updates read new ones too. Files read before are skipped, so running it again is quick.</p>
 
 <h2 id="iphone">iPhone backups</h2>
-<p>MessageArchiver can read a backup of an iPhone made with Finder instead of this Mac's Messages, which helps when the iPhone has older messages than the Mac.</p>
+<p>MessageArchiver can read a backup of an iPhone made with Finder instead of this Mac's Messages (<a href="#source">which to use</a>; <a href="#make-backup">how to make one</a>).</p>
 <ol>
-  <li>Connect the iPhone, select it in Finder's sidebar, and click <strong>Back Up Now</strong> with "Back up all of the data on your iPhone to this Mac" chosen.</li>
+  <li><a href="#make-backup">Make the backup</a> in Finder.</li>
   <li>In MessageArchiver, open the menu under the heading on the start screen (or in the dashboard's toolbar) and choose the backup.</li>
   <li>If the backup is encrypted, enter its password. It's used only to read the backup and is never saved; you enter it again next time.</li>
 </ol>
@@ -210,7 +242,7 @@ th { color: var(--muted); font-weight: 600; }
 <p>With a backup chosen, plug-ins that can read backups (WhatsApp) read that backup too, since the phone keeps the whole history; the menu's <strong>Also read</strong> says so, for example "WhatsApp in “Alex’s iPhone” backup".</p>
 
 <h2 id="plugins">Other apps: WhatsApp, Signal, Telegram and plug-ins</h2>
-<p>Messages is built in. Other apps' messages are read by <strong>plug-ins</strong>, which you download from <strong>Plug-ins</strong> under the Download button on <a href="https://apps.rysys.net/?app=messagearchiver&amp;sys=macos">MessageArchiver's page</a>, only for the apps you use. They need MessageArchiver 1.1.0 or later.</p>
+<p>Messages is built in. Other apps' messages are read by <strong>plug-ins</strong>, which you download from <strong>Plug-ins</strong> on <a href="https://apps.rysys.net/?app=messagearchiver&amp;sys=macos">MessageArchiver's page</a>, only for the apps you use.</p>
 <ol>
   <li>Download the plug-in (a <code>.maplugin</code> file) and double-click it, or choose <span class="menu">File › Install Plug-in…</span>. If your browser opened it into a folder instead (Safari can), choose that folder in <span class="menu">File › Install Plug-in…</span>: it is checked the same way.</li>
   <li>MessageArchiver asks first, then installs it, if RYSYS signed it and nothing in it was changed since. Anything else is refused, with the reason.</li>
@@ -227,7 +259,7 @@ th { color: var(--muted); font-weight: 600; }
 <p>Telegram keeps your chats on its servers, so the Telegram plug-in reads the copy Telegram gives you: in Telegram for Mac, <strong>Settings</strong> › <strong>Data and Storage</strong> › <strong>Export Telegram Data</strong>; in Telegram Desktop, <strong>Settings</strong> › <strong>Advanced</strong> › <strong>Export Telegram data</strong>. Set <strong>Format</strong> to <strong>Machine-readable JSON</strong> (or Both: HTML alone can't be read) and <strong>Folder</strong> to <strong>Downloads</strong> (Telegram for Mac otherwise saves inside its own folder, where MessageArchiver can't look). The first export can take about a day to be ready. Then choose <strong>Telegram: Choose an Export…</strong> in the source menu, and the export's folder, or Downloads. One-to-one chats, groups, bots and Saved Messages are read; channels are not. Telegram's export has phone numbers only in your contacts, so a person you have a one-to-one chat with is matched to Contacts by their number when that chat's name matches one of your contacts; anyone else, including someone in a group who only shares a contact's name, is listed by Telegram's id. An edited message is marked edited; Telegram doesn't keep its earlier versions. The export holds your messages unencrypted: keep it safe, or delete it once your archive is made.</p>
 
 <h3>Release candidates: Instagram, Messenger, Google Voice, Tinder and Hinge</h3>
-<p>These plug-ins are <strong>release candidates</strong> (version 0.0.x): built from what is known of each service’s download of your data, but not yet tested on a real one. Try them, and keep the downloads until you have checked your archive. Each reads the copy of your data the service gives you on request; its <strong>Instructions</strong> say how to ask for it. Unzip the download into Downloads, then choose <strong>&lt;Plug-in&gt;: Choose an Export…</strong> in the source menu, and Downloads, or the unzipped folder. They need MessageArchiver 1.4.2 or later.</p>
+<p>These plug-ins are <strong>release candidates</strong> (version 0.0.x): built from what is known of each service’s download of your data, but not yet tested on a real one. Try them, and keep the downloads until you have checked your archive. Each reads the copy of your data the service gives you on request; its <strong>Instructions</strong> say how to ask for it. Unzip the download into Downloads, then choose <strong>&lt;Plug-in&gt;: Choose an Export…</strong> in the source menu, and Downloads, or the unzipped folder.</p>
 <ul>
   <li><strong>Instagram</strong> and <strong>Messenger</strong>: Meta’s <strong>Download your information</strong> (Messages, JSON); for Messenger also <strong>Download secure storage data</strong>, which has the end-to-end encrypted chats. People are known only by the name they show there, so join them to the right person by hand in People.</li>
   <li><strong>Google Voice</strong>: Google Takeout, with only <strong>Voice</strong> ticked. Texts, calls and voicemails, with Google’s transcripts as notes; people are known by their numbers, so they meet the same person in Messages.</li>

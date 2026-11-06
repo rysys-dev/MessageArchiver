@@ -97,15 +97,60 @@ struct StartView: View {
 
     var body: some View {
         StartLayout {
+            if state.macIsEmpty {
+                CardHeading(symbol: "iphone",
+                            title: "Your messages are on your iPhone",
+                            detail: "This Mac’s Messages app has no messages in it. MessageArchiver can read them from a backup of your iPhone instead.")
+                SourceMenu()
+                IPhoneBackupHelp()
+            } else {
+                card
+            }
+        } below: {
+            SourceNotices()
+            if let older = state.olderInBackup, state.backup == nil {
+                Text("The backup of “\(older.backup.deviceName)” goes back to \(older.backupFrom.formatted(.dateTime.month(.abbreviated).year())); this Mac only to \(older.macFrom.formatted(.dateTime.month(.abbreviated).year())). To export the older messages, choose the backup in the menu above.")
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+            }
+            if state.whatsAppFromMac {
+                Text(state.backups.isEmpty
+                     ? "WhatsApp for Mac has only the messages that arrived after it was linked. Your iPhone has WhatsApp’s whole history: make a backup of it in Finder, then choose it in the menu above."
+                     : "WhatsApp for Mac has only the messages that arrived after it was linked. For WhatsApp’s whole history, choose your iPhone’s backup in the menu above.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            if let backup = state.backup, backup.isOld(), let made = backup.lastBackup {
+                Text("This backup was made on \(made.formatted(date: .long, time: .omitted)). For messages since then, back up your iPhone again in Finder, then choose the new backup in the menu above.")
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+            }
+            if state.contacts != .allowed {
+                Text("Names from Contacts are off, so people show as phone numbers and email addresses. You can turn them on in Settings (⌘,).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .task(id: state.fullDiskAccess) { await state.readSummary() }
+        .task(id: TaskKey(diagnostics: state.diagnostics != nil, backups: state.backups.map(\.id))) { await state.compareWithBackup() }
+        // Back from Finder with a new backup: look again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if state.macIsEmpty { state.lookAgain() }
+        }
+    }
+
+    private struct TaskKey: Equatable { var diagnostics: Bool; var backups: [String] }
+
+    /// The usual card: the source, its totals, and Choose What to Export.
+    @ViewBuilder private var card: some View {
             CardHeading(symbol: state.backup == nil ? "bubble.left.and.text.bubble.right" : "iphone",
                         title: state.backup.map { "Messages from “\($0.deviceName)”" } ?? "Your Messages on this Mac",
                         detail: state.legalTools ? "Export conversations and their attachments\nas web pages, a legal transcript, Markdown and JSON."
                             : "Export conversations and their attachments\nas web pages, Markdown and JSON.")
             SourceMenu()
-            if state.fullDiskAccess == .noDatabase && state.backup == nil {
-                Text("There’s no Messages history on this Mac yet.")
-                    .foregroundStyle(palette.flag)
-            } else if let diagnostics = state.diagnostics {
+            if let diagnostics = state.diagnostics {
                 VStack(spacing: 4) {
                     ForEach(diagnostics.summaryLines(), id: \.self) { Text($0) }
                 }
@@ -158,15 +203,55 @@ struct StartView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
-        } below: {
-            SourceNotices()
-            if state.contacts != .allowed {
-                Text("Names from Contacts are off, so people show as phone numbers and email addresses. You can turn them on in Settings (⌘,).")
+    }
+}
+
+/// This Mac's Messages is empty (Milestone 30): choose a backup of the iPhone, or make one,
+/// step by step, for someone who has never made one.
+struct IPhoneBackupHelp: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.palette) private var palette
+    static let guideURL = URL(string: "https://apps.rysys.net/?app=messagearchiver&sys=macos#mac-messages")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !state.backups.isEmpty {
+                Text(state.backups.count == 1 ? "There’s a backup of your iPhone on this Mac:" : "There are backups on this Mac. Choose the one of your iPhone:")
+                ForEach(state.backups) { b in
+                    Button { state.use(b) } label: {
+                        Label(b.label, systemImage: b.isEncrypted ? "lock.fill" : "iphone")
+                    }
+                    .controlSize(.large)
+                }
+                Text("If you’ve used your iPhone since, make a new backup first (below), for the latest messages.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
+            ForEach(state.backupsWithoutMessages) { b in
+                Text("The backup of “\(b.deviceName)” has no messages in it. Back up the iPhone that has your messages.")
+                    .foregroundStyle(palette.flag)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(state.backups.isEmpty ? "Make a backup of your iPhone on this Mac. A backup is a copy of your iPhone, saved on this Mac: making one changes nothing on your phone, and MessageArchiver only reads it."
+                                       : "To make a new backup:")
+                .fixedSize(horizontal: false, vertical: true)
+            Step(number: 1, text: "Connect your iPhone to this Mac with a cable. If the iPhone asks whether to trust this computer, tap Trust and enter its passcode.") { EmptyView() }
+            Step(number: 2, text: "Open Finder and click your iPhone in the sidebar, under Locations.") {
+                Button("Open Finder") { state.openFinder() }
+            }
+            Step(number: 3, text: "In General, choose “Back up all of the data on your iPhone to this Mac”.") { EmptyView() }
+            Step(number: 4, text: "Click Back Up Now and leave the iPhone connected until it finishes. The first backup can take an hour or more.") { EmptyView() }
+            Step(number: 5, text: "Come back here: the backup appears above. If it asks for Full Disk Access, allow it, so MessageArchiver can read the backup.") {
+                Button("Look Again") { state.lookAgain() }
+            }
+            // A link the person clicks opens the browser; the app itself never goes online.
+            Text(LocalizedStringKey("To keep your archive up to date on its own, use Messages on this Mac instead: [how to set it up](\(Self.guideURL.absoluteString))."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .task(id: state.fullDiskAccess) { await state.readSummary() }
+        .frame(maxWidth: 480, alignment: .leading)
+        .padding(.top, 4)
+        .onAppear { state.listBackups() }
     }
 }

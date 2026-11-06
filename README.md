@@ -1,29 +1,47 @@
 # MessageArchiver
 
-A native Mac app that exports your Messages history (iMessage, SMS, RCS), with attachments, to
-a folder on your Mac. No Terminal, no Homebrew. It is local-first and fully offline, and it
-never changes anything in Messages.
+A native Mac app that keeps your Messages history (iMessage, SMS, RCS), with its attachments,
+in a folder on your Mac. No Terminal, no Homebrew.
 
-One export can produce:
-- **Conversations:** a faithful, iMessage-style HTML view for a personal archive.
-- **Transcripts** (with Settings ▸ Legal tools on): a formal record with Bates numbering, pagination and SHA-256 integrity
-  hashes, as HTML and PDF. From a transcript, an **exhibit** of only the messages you pick
-  (File ▸ Search an Archive… ▸ New Exhibit…), numbered on, with each message's place in the
-  full transcript and every gap marked, and redactions with a log (the unredacted copy beside
-  it, the same pages).
-- **Markdown and JSON:** clean text and structured data for LLMs and research.
-- **Message Explorer:** in every archive, `explorer.html` browses it like a messaging app,
-  people and conversations side by side, offline in any browser.
+## Features
 
-It exports conversation web pages, Markdown, JSON ([schema](docs/json-schema.md)) and legal transcripts (PDF with Bates numbers), with attachments and a SHA-256 manifest that File ▸ Verify Archive… checks. File ▸ Update Archive… adds what's new since (Settings ▸ Automatic updates does it daily or weekly on its own), and File ▸ Search an Archive… finds any message, and, when chosen, words in photos and voice notes, read on the Mac. Before exporting, the dashboard's search finds conversations by what was said (Settings ▸ Search index shows and deletes that index). It also reads iPhone backups made with Finder, encrypted ones included (the password is never saved). A Platform filter shows and exports only iMessage, SMS, RCS or other services' messages.
+The same list is on the app's page at
+[apps.rysys.net](https://apps.rysys.net/?app=messagearchiver&sys=macos); its source is
+[`docs/features.html`](docs/features.html).
 
-Other apps' messages come from **plug-ins**, downloaded separately and installed from the app
-(File ▸ Install Plug-in…): each must be signed by RYSYS and runs with no network access. The
-first are **WhatsApp**, from WhatsApp for Mac or an iPhone backup, **Signal**, from the chat
-history Signal Desktop exports, and **Telegram**, from Telegram's data export. **Release
-candidates**, not yet tested on real downloads: **Instagram**, **Messenger**, **Google Voice**,
-**Tinder** and **Hinge**, each from the copy of your data the service gives on request. Someone
-you reach in two apps is one conversation. How plug-ins work: [`docs/plugins.md`](docs/plugins.md).
+1. **Your messages, kept for good, in files you own.** MessageArchiver copies your Messages
+   history to a folder on your Mac, with every photo, video and voice note, from Messages on
+   your Mac or from a backup of your iPhone. The archive opens
+   in any browser, on any computer, with no Apple account, and its Message Explorer shows your
+   people and conversations side by side, like a messaging app. Automatic updates keep it
+   current, daily or weekly: if Messages keeps messages for only 30 days or a year, or a
+   message is deleted on the phone, the archive already has it.
+2. **Find any message.** Search with words in any order, or an exact phrase, and narrow by
+   person, conversation, dates or attachments. Before you export, you can also find
+   conversations by what was said in them.
+3. **Every app, one conversation per person.** Plug-ins add other apps' messages beside
+   Messages: WhatsApp, Signal and Telegram, and Instagram, Messenger, Google Voice, Tinder and
+   Hinge (in testing). Someone you text and also reach on WhatsApp is one person and one
+   conversation. Plug-ins are signed by RYSYS and run with no network access
+   ([how they work](docs/plugins.md)).
+4. **Words in photos and voice notes.** Search can also find the words in your photos and what
+   your voice notes say, read by macOS on your Mac. Off until you turn it on.
+5. **Your iPhone's whole history.** A Finder backup of your iPhone often goes further back than
+   your Mac, and has WhatsApp's whole history too. Encrypted backups work (the password is
+   never saved).
+6. **Ready for other software.** Every conversation is also saved as Markdown and JSON
+   ([schema](docs/json-schema.md)), for an AI assistant, a spreadsheet or your own tools.
+   Attachments are named by date, and photos, voice notes and videos can be converted so any
+   browser plays them.
+7. **Proof nothing changed.** Every archive has a SHA-256 manifest of its files, and
+   File ▸ Verify Archive… checks each one.
+8. **Legal transcripts, for a court or a lawyer.** With Settings ▸ Legal tools on: transcripts
+   in PDF and HTML with numbered entries, Bates numbers and Page X of Y; exhibits of only the
+   messages you choose, with every gap marked; and redaction, with a log and an unredacted copy
+   beside it.
+
+Free and open source (GNU GPL v3). Fully offline: it makes no network connections. Read only: it
+never changes Messages, an iPhone backup or another app's data.
 
 ## Install (for friends)
 
