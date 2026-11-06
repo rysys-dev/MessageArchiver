@@ -159,9 +159,7 @@ struct StartView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
                 if !state.otherSourcesTaken.isEmpty {
-                    Text("Also read: " + state.otherSourcesTaken.map(\.1.label).joined(separator: ", "))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    OtherSourcesFold(labels: state.otherSourcesTaken.map(\.1.label))
                 }
             } else if state.isReadingSummary {
                 HStack(spacing: 8) {
@@ -253,5 +251,36 @@ struct IPhoneBackupHelp: View {
         .frame(maxWidth: 480, alignment: .leading)
         .padding(.top, 4)
         .onAppear { state.listBackups() }
+    }
+}
+
+/// The other apps read beside Messages, folded to one line (2026-11-06: the list ran past
+/// the card's edge and was cut off): "Also read: 4 other sources ›", and a click lists each.
+private struct OtherSourcesFold: View {
+    let labels: [String]
+    @State private var open = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Also read: \(labels.count) other \(labels.count == 1 ? "source" : "sources")")
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(open ? "Hide the list" : "Show what else is read")
+            if open {
+                ForEach(labels, id: \.self) { Text($0) }
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
     }
 }
